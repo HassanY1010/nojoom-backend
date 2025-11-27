@@ -12,7 +12,6 @@ import morgan from 'morgan';
 // Import routes
 import { initializeDatabase } from './config/db.js';
 import authRoutes from './routes/authRoutes.js';
-import { authController } from "./controllers/authController.js";
 import videoRoutes from './routes/videoRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
 import tokenRoutes from './routes/tokenRoutes.js';
@@ -22,7 +21,6 @@ import resetPasswordRoutes from "./routes/resetPasswordRoutes.js";
 import usersRoutes from './routes/usersRoutes.js';
 import messagesRoutes from './routes/messagesRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
-import commentRoutes from './routes/commentRoutes.js';
 import searchRoutes from './routes/searchRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import challengeRoutes from './routes/challengeRoutes.js';
@@ -131,7 +129,7 @@ initSocket(server);
 initializeDatabase();
 
 // ==================== Challenge Scheduler ====================
-ChallengeScheduler.init();
+ChallengeScheduler.start();
 
 // ==================== Start Server ====================
 const PORT = process.env.PORT || 5000;
@@ -319,7 +317,7 @@ app.use('/api/challenges', challengeRoutes);
 app.use('/api/notifications', notificationRoutes);
 
 
-app.post('/create-admin', authController.createAdminIfNotExists);
+
 
 // ==================== Debug Routes ====================
 
