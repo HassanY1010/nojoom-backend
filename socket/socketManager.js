@@ -23,7 +23,6 @@ export const initSocket = (server) => {
     pingTimeout: 60000,
     pingInterval: 25000
   });
-};
 
   // ==================== مصادقة Socket ====================
   io.use(async (socket, next) => {
@@ -898,9 +897,22 @@ export const initSocket = (server) => {
       }
     });
 
+    // تنظيف التخزين المؤقت بانتظام
+    const cleanupInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [key, message] of messageStore.entries()) {
+        if (now - message.timestamp > MESSAGE_TTL) {
+          messageStore.delete(key);
+        }
+      }
+    }, 60000); // كل دقيقة
+
     // ==================== قطع الاتصال ====================
     socket.on("disconnect", (reason) => {
       console.log("❌ User disconnected:", socket.id, "User:", socket.username, "Reason:", reason);
+
+      // إيقاف تنظيف التخزين المؤقت
+      clearInterval(cleanupInterval);
 
       // ✅ حذف المستخدم من القائمة
       connectedUsers.delete(socket.userId);
@@ -918,20 +930,6 @@ export const initSocket = (server) => {
         timestamp: new Date().toISOString()
       });
     });
-
-    // تنظيف التخزين المؤقت بانتظام
-    const cleanupInterval = setInterval(() => {
-      const now = Date.now();
-      for (const [key, message] of messageStore.entries()) {
-        if (now - message.timestamp > MESSAGE_TTL) {
-          messageStore.delete(key);
-        }
-      }
-    }, 60000); // كل دقيقة
-
-    socket.on("disconnect", () => {
-      clearInterval(cleanupInterval);
-    });
   });
 
   // ==================== معالجة الأخطاء العالمية ====================
@@ -940,8 +938,9 @@ export const initSocket = (server) => {
   });
 
   console.log("✅ Socket.io server initialized successfully");
-  return io; // ✅ داخل الدالة
+  return io;
 };
+
 // ==================== الدوال المساعدة ====================
 
 function updateUserActivity(userId) {
