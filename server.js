@@ -21,6 +21,7 @@ import resetPasswordRoutes from "./routes/resetPasswordRoutes.js";
 import usersRoutes from './routes/usersRoutes.js';
 import messagesRoutes from './routes/messagesRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
+import commentRoutes from './routes/commentRoutes.js';
 import searchRoutes from './routes/searchRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import challengeRoutes from './routes/challengeRoutes.js';
