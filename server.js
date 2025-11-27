@@ -128,7 +128,7 @@ initSocket(server);
 initializeDatabase();
 
 // ==================== Challenge Scheduler ====================
-ChallengeScheduler.start();
+ChallengeScheduler.init();
 
 // ==================== Start Server ====================
 const PORT = process.env.PORT || 5000;
