@@ -309,7 +309,7 @@ export const authController = {
     }
   },
 
-  async createAdminIfNotExists(req, res) {
+async createAdminIfNotExists(req, res) {
     try {
       // Check if admin exists
       const [admin] = await pool.execute(
@@ -317,25 +317,26 @@ export const authController = {
       );
 
       if (admin.length > 0) {
-        return res.json({ message: 'Admin already exists' });
+        return res.json({ message: "Admin already exists" });
       }
 
       // Create encrypted password for admin
-      const passwordHash = await bcrypt.hash('admin123', 10);
-      const defaultBirthDate = '1990-01-01';
+      const passwordHash = await bcrypt.hash("admin123", 10);
+      const defaultBirthDate = "1990-01-01";
 
       // Create admin in database
       await pool.execute(
-        'INSERT INTO users (username, email, password, role, birth_date, birth_day, birth_month, birth_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        ['admin', 'admin@example.com', passwordHash, 'admin', defaultBirthDate, 1, 1, 1990]
+        "INSERT INTO users (username, email, password, role, birth_date, birth_day, birth_month, birth_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ["admin", "admin@example.com", passwordHash, "admin", defaultBirthDate, 1, 1, 1990]
       );
 
-      res.json({ message: 'Admin user created successfully' });
+      res.json({ message: "Admin user created successfully" });
     } catch (error) {
-      console.error('❌ Create admin error:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      console.error("❌ Create admin error:", error);
+      res.status(500).json({ error: "Internal server error" });
     }
   },
+
 
   async login(req, res) {
     try {
