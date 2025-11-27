@@ -3,16 +3,11 @@ import { createServer } from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import cors from 'cors';
 import fs from 'fs';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
-import commentRoutes from './routes/commentRoutes.js';
 import compression from 'compression';
 import morgan from 'morgan';
-
-// تحميل متغيرات البيئة أولاً
-dotenv.config();
 
 // Import routes
 import { initializeDatabase } from './config/db.js';
@@ -31,18 +26,16 @@ import aiRoutes from './routes/aiRoutes.js';
 import challengeRoutes from './routes/challengeRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 
-
-import { authController } from './controllers/authController.js';
-
 // Socket.io
 import { initSocket } from './socket/socketManager.js';
 
 // Challenge Scheduler
 import { ChallengeScheduler } from './services/challengeScheduler.js';
 
-// استيراد middleware المصادقة
+// Middleware for auth
 import { authenticateToken } from './middleware/authMiddleware.js';
-import { pool } from './config/db.js';
+
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,7 +43,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const server = createServer(app);
 
-// ==================== الأمان والتحسينات ====================
+// ==================== Middleware ====================
 
 // Helmet for security headers
 app.use(helmet({
@@ -58,27 +51,32 @@ app.use(helmet({
   contentSecurityPolicy: false
 }));
 
-// Compression for performance
+// Compression
 app.use(compression());
 
+// Logging
+app.use(morgan('dev'));
+
+// JSON parsing
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 // Rate limiting
-const limiter = rateLimit({
+const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // limit each IP to 1000 requests per windowMs
+  max: 1000,
   message: {
     error: 'Too many requests from this IP, please try again later.',
     timestamp: new Date().toISOString()
   },
   standardHeaders: true,
-  legacyHeaders: false,
+  legacyHeaders: false
 });
+app.use(generalLimiter);
 
-app.use(limiter);
-
-// More strict rate limiting for auth endpoints
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10, // 10 attempts per 15 minutes
+  max: 10,
   message: {
     error: 'Too many authentication attempts, please try again later.',
     timestamp: new Date().toISOString()
@@ -86,26 +84,16 @@ const authLimiter = rateLimit({
 });
 
 // ==================== CORS Middleware ====================
+const allowedOrigins = [
+  process.env.CLIENT_URL
+].filter(Boolean);
+
 app.use((req, res, next) => {
-  const allowedOrigins = [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'http://localhost:5174',
-    'http://127.0.0.1:5174',
-    'http://localhost:8080',
-    'http://127.0.0.1:8080',
-    process.env.FRONTEND_URL
-  ].filter(Boolean);
-
   const origin = req.headers.origin;
-
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
-
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With, Origin, Refresh-Token, X-API-Key');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Max-Age', '86400');
@@ -114,8 +102,38 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
-
   next();
+});
+
+// ==================== Routes ====================
+app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/videos', videoRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/token', tokenRoutes);
+app.use('/api/explore', exploreRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/reset-password', resetPasswordRoutes);
+app.use('/api/users', usersRoutes);
+app.use('/api/messages', messagesRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/challenges', challengeRoutes);
+app.use('/api/notifications', notificationRoutes);
+
+// ==================== Socket.io ====================
+initSocket(server);
+
+// ==================== Database ====================
+initializeDatabase();
+
+// ==================== Challenge Scheduler ====================
+ChallengeScheduler.start();
+
+// ==================== Start Server ====================
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => {
+  console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
 });
 
 // ==================== Middlewares ====================
@@ -240,34 +258,34 @@ const startServer = async () => {
     } catch (error) {
       console.log('ℹ️ Default thumbnail not found, using fallback');
     }
+const PORT = process.env.PORT || 5000;
+const HOST = process.env.HOST || '0.0.0.0';
 
-    const PORT = process.env.PORT || 5000;
-    const HOST = process.env.HOST || '0.0.0.0';
+server.listen(PORT, HOST, () => {
+  console.log('='.repeat(70));
+  console.log('🚀 NOJOOM SERVER STARTED SUCCESSFULLY');
+  console.log('='.repeat(70));
+  console.log(`📍 Port: ${PORT}`);
+  console.log(`🌐 Host: ${HOST}`);
+  console.log(`📡 URL: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
+  console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🛡️ Security: Helmet, Rate Limiting, CORS Enabled`);
+  console.log(`📊 Features: Recommendations, Reports, Real-time Chat, Search`);
+  console.log(`🖼️ Static Files: Avatars, Videos, Thumbnails, Default Images`);
+  console.log('='.repeat(70));
+  console.log(`🔍 Health: http://localhost:${PORT}/api/health`);
+  console.log(`🔎 Search: http://localhost:${PORT}/api/search`);
+  console.log(`🧪 CORS Test: http://localhost:${PORT}/api/cors-test`);
+  console.log(`📈 Metrics: http://localhost:${PORT}/api/metrics`);
+  console.log(`🔗 API Docs: http://localhost:${PORT}/api/docs`);
+  console.log(`🖼️ Static Files: http://localhost:${PORT}/uploads/`);
+  console.log(`🖼️ Thumbnails: http://localhost:${PORT}/thumbnails/`);
+  console.log('='.repeat(70));
 
-    server.listen(PORT, HOST, () => {
-      console.log('='.repeat(70));
-      console.log('🚀 NOJOOM SERVER STARTED SUCCESSFULLY');
-      console.log('='.repeat(70));
-      console.log(`📍 Port: ${PORT}`);
-      console.log(`🌐 Host: ${HOST}`);
-      console.log(`📡 URL: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
-      console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`🛡️ Security: Helmet, Rate Limiting, CORS Enabled`);
-      console.log(`📊 Features: Recommendations, Reports, Real-time Chat, Search`);
-      console.log(`🖼️ Static Files: Avatars, Videos, Thumbnails, Default Images`);
-      console.log('='.repeat(70));
-      console.log(`🔍 Health: http://localhost:${PORT}/api/health`);
-      console.log(`🔎 Search: http://localhost:${PORT}/api/search`);
-      console.log(`🧪 CORS Test: http://localhost:${PORT}/api/cors-test`);
-      console.log(`📈 Metrics: http://localhost:${PORT}/api/metrics`);
-      console.log(`🔗 API Docs: http://localhost:${PORT}/api/docs`);
-      console.log(`🖼️ Static Files: http://localhost:${PORT}/uploads/`);
-      console.log(`🖼️ Thumbnails: http://localhost:${PORT}/thumbnails/`);
-      console.log('='.repeat(70));
+  // ✅ تهيئة جدولة التحديات الأسبوعية
+  ChallengeScheduler.start(); // أو init() إذا كانت موجودة في الكلاس
+});
 
-      // ✅ تهيئة جدولة التحديات الأسبوعية
-      ChallengeScheduler.init();
-    });
 
   } catch (error) {
     console.error('❌ Failed to start server:', error);
@@ -747,17 +765,13 @@ app.get('/api/cors-test', (req, res) => {
     headers: req.headers,
     timestamp: new Date().toISOString(),
     cors: {
-      allowedOrigins: [
-        'http://localhost:5173',
-        'http://127.0.0.1:5173',
-        'http://localhost:3000',
-        process.env.FRONTEND_URL
-      ].filter(Boolean),
+      allowedOrigins: [process.env.CLIENT_URL].filter(Boolean),
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
     }
   });
 });
+
 
 // Test POST endpoint for CORS
 app.post('/api/cors-test', (req, res) => {
@@ -777,11 +791,11 @@ app.post('/api/cors-test', (req, res) => {
 app.get('/api/static-info', (req, res) => {
   res.json({
     staticFiles: {
-      avatars: 'http://localhost:5000/uploads/avatars/',
-      videos: 'http://localhost:5000/uploads/videos/',
-      thumbnails: 'http://localhost:5000/thumbnails/',
-      defaultAvatar: 'http://localhost:5000/default-avatar.png',
-      defaultThumbnail: 'http://localhost:5000/default-thumbnail.jpg'
+      avatars: '${import.meta.env.VITE_API_URL}/uploads/avatars/',
+      videos: '${import.meta.env.VITE_API_URL}/uploads/videos/',
+      thumbnails: '${import.meta.env.VITE_API_URL}/thumbnails/',
+      defaultAvatar: '${import.meta.env.VITE_API_URL}/default-avatar.png',
+      defaultThumbnail: '${import.meta.env.VITE_API_URL}/default-thumbnail.jpg'
     },
     uploadsDirectory: path.join(__dirname, 'uploads'),
     thumbnailsDirectory: path.join(__dirname, 'thumbnails'),
