@@ -12,6 +12,7 @@ import morgan from 'morgan';
 // Import routes
 import { initializeDatabase } from './config/db.js';
 import authRoutes from './routes/authRoutes.js';
+import authController from './controllers/authController.js';
 import videoRoutes from './routes/videoRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
 import tokenRoutes from './routes/tokenRoutes.js';
