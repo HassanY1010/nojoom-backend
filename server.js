@@ -12,7 +12,7 @@ import morgan from 'morgan';
 // Import routes
 import { initializeDatabase } from './config/db.js';
 import authRoutes from './routes/authRoutes.js';
-import * as authController from './controllers/authController.js';
+import { authController } from "./controllers/authController.js";
 import videoRoutes from './routes/videoRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
 import tokenRoutes from './routes/tokenRoutes.js';
@@ -62,6 +62,7 @@ app.use(morgan('dev'));
 // JSON parsing
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.post("/create-admin", authController.createAdminIfNotExists);
 
 // Rate limiting
 const generalLimiter = rateLimit({
