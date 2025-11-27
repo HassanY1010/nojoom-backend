@@ -940,9 +940,8 @@ export const initSocket = (server) => {
   });
 
   console.log("✅ Socket.io server initialized successfully");
-  return io;
+  return io; // ✅ داخل الدالة
 };
-
 // ==================== الدوال المساعدة ====================
 
 function updateUserActivity(userId) {
