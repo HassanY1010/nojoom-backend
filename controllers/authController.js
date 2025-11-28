@@ -368,15 +368,15 @@ async createAdminIfNotExists(req, res) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      // ✅ التحقق من تفعيل البريد الإلكتروني (ما عدا المدير)
-      if (user.role !== 'admin' && !user.email_verified) {
-        return res.status(403).json({
-          error: 'Email not verified',
-          message: 'Please verify your email before logging in',
-          email: user.email,
-          emailVerified: false
-        });
-      }
+      // // ✅ التحقق من تفعيل البريد الإلكتروني (ما عدا المدير)
+      // if (user.role !== 'admin' && !user.email_verified) {
+      //   return res.status(403).json({
+      //     error: 'Email not verified',
+      //     message: 'Please verify your email before logging in',
+      //     email: user.email,
+      //     emailVerified: false
+      //   });
+      // }
 
 
 
