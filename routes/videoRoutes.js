@@ -6,67 +6,118 @@ import { upload } from '../middleware/uploadMiddleware.js';
 
 const router = express.Router();
 
-// ==================== مسارات المشاركة الجديدة ====================
+// ============================================================
+// 🟦 1) مسارات المشاركة (SHARES)
+// ============================================================
 
-// ✅ تسجيل مشاركة الفيديو
+// تسجيل مشاركة الفيديو
 router.post('/:videoId/share', authenticateToken, videoController.addShare);
 
-// ✅ الحصول على عدد المشاركات
+// عدد مشاركات فيديو
 router.get('/:videoId/shares/count', videoController.getShareCount);
 
-// ==================== مسارات جديدة ====================
+// ============================================================
+// 🟩 2) مسارات المشاهدات (VIEWS)
+// ============================================================
 
-// ✅ الحصول على فيديوهات المستخدم مع الفرز
-router.get('/user/:userId', videoController.getUserVideos);
-
-// ✅ تسجيل مشاهدة الفيديو
+// تسجيل مشاهدة
 router.post('/:videoId/view', authenticateToken, videoController.addView);
 
-// ==================== مسارات خاصة / مصادقة ====================
+// ============================================================
+// 🟨 3) مسارات المستخدم USER VIDEO ROUTES
+// ============================================================
 
-// مسارات المستخدم
+// جميع فيديوهات مستخدم
+router.get('/user/:userId', videoController.getUserVideos);
+
+// فيديو واحد يخص المستخدم
 router.get('/user/video', authenticateToken, videoController.getUserVideo);
+
+// فيديوهات أعجب بها المستخدم
 router.get('/user/liked', authenticateToken, videoController.getLikedVideos);
-router.post('/upload', authenticateToken, upload.single('video'), videoController.uploadVideo);
-router.delete('/:id', authenticateToken, videoController.deleteVideo);
 
-// مسارات الإعجاب
-router.post('/:videoId/like', authenticateToken, videoController.likeVideo);
-router.delete('/:videoId/like', authenticateToken, videoController.unlikeVideo);
-
-// ========== مسارات نظام التوصية الجديدة ==========
-router.get('/recommended', authenticateToken, videoController.getRecommendedVideos);
-router.get('/following', authenticateToken, videoController.getFollowingVideos);
-router.post('/user/watch-history', authenticateToken, videoController.recordWatchHistory);
-router.post('/user/interaction', authenticateToken, videoController.recordInteraction);
-
-// ========== ✅ مسارات التعليقات الجديدة ==========
-router.get('/:videoId/comments', commentController.getComments);
-router.post('/:videoId/comments', authenticateToken, commentController.postComment);
-router.get('/:videoId/comments/count', videoController.getCommentCount);
-
-// ==================== 🚀 VIDEO TURBO ENGINE ROUTES ====================
-
-// الحصول على manifest file (HLS)
-router.get('/:videoId/manifest', videoController.getManifest);
-
-// الحصول على chunk محدد
-router.get('/:videoId/chunk/:quality/:index', videoController.getChunk);
-
-// الحصول على حالة معالجة الفيديو
-router.get('/:videoId/processing-status', videoController.getProcessingStatus);
-
-// الحصول على تقدم المشاهدة
-router.get('/:videoId/progress', authenticateToken, videoController.getVideoProgress);
-
-// حفظ تقدم المشاهدة
-router.post('/:videoId/progress', authenticateToken, videoController.saveVideoProgress);
-
-// الحصول على الفيديوهات غير المكتملة (للاستئناف)
+// فيديوهات غير مكتملة
 router.get('/user/incomplete', authenticateToken, videoController.getIncompleteVideos);
 
-// ==================== مسارات عامة / بدون مصادقة ====================
+// ============================================================
+// 🟥 4) الرفع والحذف Upload / Delete
+// ============================================================
+
+// رفع فيديو
+router.post(
+  '/upload',
+  authenticateToken,
+  upload.single('video'),
+  videoController.uploadVideo
+);
+
+// حذف فيديو
+router.delete('/:id', authenticateToken, videoController.deleteVideo);
+
+// ============================================================
+// 🟧 5) الإعجاب LIKE SYSTEM
+// ============================================================
+
+// إعجاب
+router.post('/:videoId/like', authenticateToken, videoController.likeVideo);
+
+// إزالة الإعجاب
+router.delete('/:videoId/like', authenticateToken, videoController.unlikeVideo);
+
+// ============================================================
+// 🟦 6) نظام التوصية RECOMMENDATION ENGINE
+// ============================================================
+
+router.get('/recommended', authenticateToken, videoController.getRecommendedVideos);
+
+router.get('/following', authenticateToken, videoController.getFollowingVideos);
+
+router.post('/user/watch-history', authenticateToken, videoController.recordWatchHistory);
+
+router.post('/user/interaction', authenticateToken, videoController.recordInteraction);
+
+// ============================================================
+// 🟪 7) التعليقات COMMENTS
+// ============================================================
+
+// جميع التعليقات
+router.get('/:videoId/comments', commentController.getComments);
+
+// إضافة تعليق
+router.post('/:videoId/comments', authenticateToken, commentController.postComment);
+
+// عدد التعليقات
+router.get('/:videoId/comments/count', videoController.getCommentCount);
+
+// ============================================================
+// 🔥 8) VIDEO TURBO ENGINE (HLS / CHUNKS)
+// ============================================================
+
+// ملف manifest.m3u8
+router.get('/:videoId/manifest', videoController.getManifest);
+
+// ملف chunk.ts
+router.get('/:videoId/chunk/:quality/:index', videoController.getChunk);
+
+// حالة معالجة الفيديو
+router.get('/:videoId/processing-status', videoController.getProcessingStatus);
+
+// ============================================================
+// 🟨 9) Video Progress (حفظ التقدم)
+// ============================================================
+
+router.get('/:videoId/progress', authenticateToken, videoController.getVideoProgress);
+
+router.post('/:videoId/progress', authenticateToken, videoController.saveVideoProgress);
+
+// ============================================================
+// 🟩 10) مسارات عامة PUBLIC ROUTES
+// ============================================================
+
+// كل الفيديوهات (مع الباقيناتشن / روابط كاملة / ثامبنيل)
 router.get('/', videoController.getVideos);
+
+// فيديو واحد بالـ ID
 router.get('/:id', videoController.getVideo);
 
 export default router;
