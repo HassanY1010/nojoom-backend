@@ -31,7 +31,7 @@ import notificationRoutes from './routes/notificationRoutes.js';
 import { initSocket } from './socket/socketManager.js';
 
 // Challenge Scheduler
-import { ChallengeScheduler } from './services/challengeScheduler.js';
+import { ChallengeScheduler } from './schedulers/ChallengeScheduler.js';
 
 // Middleware for auth
 import { authenticateToken } from './middleware/authMiddleware.js';
@@ -285,7 +285,7 @@ server.listen(PORT, HOST, () => {
   console.log('='.repeat(70));
 
   // ✅ تهيئة جدولة التحديات الأسبوعية
-  ChallengeScheduler.start(); // أو init() إذا كانت موجودة في الكلاس
+ChallengeScheduler.init();  // أو init() إذا كانت موجودة في الكلاس
 });
 
 
