@@ -378,7 +378,6 @@ async createAdminIfNotExists(req, res) {
         });
       }
 
-      // باقي الكود كما هو...
 
 
       // Generate tokens
