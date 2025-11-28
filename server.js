@@ -21,7 +21,6 @@ import { authController } from './controllers/authController.js';
 import resetPasswordRoutes from "./routes/resetPasswordRoutes.js";
 import usersRoutes from './routes/usersRoutes.js';
 import messagesRoutes from './routes/messagesRoutes.js';
-import commentRoutes from './routes/commentRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
 import searchRoutes from './routes/searchRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
@@ -217,9 +216,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
 // ✅ إضافة خدمة ثابتة للملفات الافتراضية
 app.use('/default-avatar.png', express.static(path.join(__dirname, 'public', 'default-avatar.png')));
 app.use('/default-thumbnail.jpg', express.static(path.join(__dirname, 'public', 'default-thumbnail.jpg')));
-
 // ==================== تهيئة السيرفر ====================
-
 const startServer = async () => {
   try {
     console.log('🔄 Initializing database...');
@@ -231,71 +228,72 @@ const startServer = async () => {
       'uploads',
       'uploads/videos',
       'uploads/avatars',
-      'thumbnails', // ✅ إضافة مجلد thumbnails
+      'thumbnails',
       'temp',
       'logs',
-      'public' // ✅ إضافة مجلد public للصور الافتراضية
+      'public'
     ];
 
     for (const dir of directories) {
       const dirPath = path.join(__dirname, dir);
       try {
         await fs.promises.access(dirPath);
-      } catch (error) {
+      } catch {
         await fs.promises.mkdir(dirPath, { recursive: true });
         console.log(`✅ Created directory: ${dir}`);
       }
     }
 
-    // ✅ إنشاء صورة افتراضية إذا لم تكن موجودة
+    // التحقق من الصور الافتراضية
     const defaultAvatarPath = path.join(__dirname, 'public', 'default-avatar.png');
     const defaultThumbnailPath = path.join(__dirname, 'public', 'default-thumbnail.jpg');
 
-    try {
-      await fs.promises.access(defaultAvatarPath);
-    } catch (error) {
-      console.log('ℹ️ Default avatar not found, using fallback');
-    }
+    try { await fs.promises.access(defaultAvatarPath); }
+    catch { console.log('ℹ️ Default avatar not found, using fallback'); }
 
-    try {
-      await fs.promises.access(defaultThumbnailPath);
-    } catch (error) {
-      console.log('ℹ️ Default thumbnail not found, using fallback');
-    }
-const PORT = process.env.PORT || 5000;
-const HOST = process.env.HOST || '0.0.0.0';
+    try { await fs.promises.access(defaultThumbnailPath); }
+    catch { console.log('ℹ️ Default thumbnail not found, using fallback'); }
 
-server.listen(PORT, HOST, () => {
-  console.log('='.repeat(70));
-  console.log('🚀 NOJOOM SERVER STARTED SUCCESSFULLY');
-  console.log('='.repeat(70));
-  console.log(`📍 Port: ${PORT}`);
-  console.log(`🌐 Host: ${HOST}`);
-  console.log(`📡 URL: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
-  console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🛡️ Security: Helmet, Rate Limiting, CORS Enabled`);
-  console.log(`📊 Features: Recommendations, Reports, Real-time Chat, Search`);
-  console.log(`🖼️ Static Files: Avatars, Videos, Thumbnails, Default Images`);
-  console.log('='.repeat(70));
-  console.log(`🔍 Health: http://localhost:${PORT}/api/health`);
-  console.log(`🔎 Search: http://localhost:${PORT}/api/search`);
-  console.log(`🧪 CORS Test: http://localhost:${PORT}/api/cors-test`);
-  console.log(`📈 Metrics: http://localhost:${PORT}/api/metrics`);
-  console.log(`🔗 API Docs: http://localhost:${PORT}/api/docs`);
-  console.log(`🖼️ Static Files: http://localhost:${PORT}/uploads/`);
-  console.log(`🖼️ Thumbnails: http://localhost:${PORT}/thumbnails/`);
-  console.log('='.repeat(70));
+    // ==================== تشغيل السيرفر ====================
+    const PORT = process.env.PORT || 5000;
+    const HOST = process.env.HOST || '0.0.0.0';
 
-  // ✅ تهيئة جدولة التحديات الأسبوعية
-ChallengeScheduler.init();  // أو init() إذا كانت موجودة في الكلاس
-});
+    server.listen(PORT, HOST, () => {
+      console.log('='.repeat(70));
+      console.log('🚀 NOJOOM SERVER STARTED SUCCESSFULLY');
+      console.log('='.repeat(70));
+      console.log(`📍 Port: ${PORT}`);
+      console.log(`🌐 Host: ${HOST}`);
+      console.log(`📡 URL: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
+      console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🛡️ Security: Helmet, Rate Limiting, CORS Enabled`);
+      console.log(`📊 Features: Recommendations, Reports, Real-time Chat, Search`);
+      console.log(`🖼️ Static Files: Avatars, Videos, Thumbnails, Default Images`);
+      console.log('='.repeat(70));
+      console.log(`🔍 Health: http://localhost:${PORT}/api/health`);
+      console.log(`🔎 Search: http://localhost:${PORT}/api/search`);
+      console.log(`🧪 CORS Test: http://localhost:${PORT}/api/cors-test`);
+      console.log(`📈 Metrics: http://localhost:${PORT}/api/metrics`);
+      console.log(`🔗 API Docs: http://localhost:${PORT}/api/docs`);
+      console.log(`🖼️ Static Files: http://localhost:${PORT}/uploads/`);
+      console.log(`🖼️ Thumbnails: http://localhost:${PORT}/thumbnails/`);
+      console.log('='.repeat(70));
 
+      // ==================== تهيئة Socket.io ====================
+      initSocket(server);
+
+      // ==================== تهيئة Challenge Scheduler ====================
+      ChallengeScheduler.init();
+    });
 
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
   }
 };
+
+
+
 
 // ==================== Routes ====================
 
