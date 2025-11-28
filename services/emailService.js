@@ -6,23 +6,23 @@ dotenv.config();
 
 class EmailService {
   constructor() {
-    // تعديل هنا: createTransport بدلاً من createTransporter
+    // استخدام المتغيرات الصحيحة من .env
     this.transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: Number(process.env.SMTP_PORT) || 587,
+      host: process.env.EMAIL_HOST || 'smtp.ethereal.email',
+      port: Number(process.env.EMAIL_PORT) || 587,
       secure: false, // true إذا كان المنفذ 465
       auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
       },
     });
   }
 
   async sendVerificationEmail(user, verificationToken) {
-    const verificationUrl = `${process.env.CLIENT_URL}/verify-email?token=${verificationToken}`;
-    
+    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+
     const mailOptions = {
-      from: `"${process.env.APP_NAME || 'Social App'}" <${process.env.SMTP_USER}>`,
+      from: `"${process.env.APP_NAME || 'Nojoom App'}" <${process.env.EMAIL_USER}>`,
       to: user.email,
       subject: 'Verify Your Email Address',
       html: `
@@ -41,7 +41,7 @@ class EmailService {
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>${process.env.APP_NAME || 'Social App'}</h1>
+                    <h1>${process.env.APP_NAME || 'Nojoom App'}</h1>
                 </div>
                 <div class="content">
                     <h2>Hello ${user.username}!</h2>
@@ -63,8 +63,9 @@ class EmailService {
     };
 
     try {
-      await this.transporter.sendMail(mailOptions);
+      const info = await this.transporter.sendMail(mailOptions);
       console.log('✅ Verification email sent to:', user.email);
+      console.log('Preview URL:', nodemailer.getTestMessageUrl(info)); // رابط المعاينة في Ethereal
       return true;
     } catch (error) {
       console.error('❌ Error sending verification email:', error);
@@ -73,10 +74,10 @@ class EmailService {
   }
 
   async sendPasswordResetEmail(user, resetToken) {
-    const resetUrl = `${process.env.CLIENT_URL}/reset-password?token=${resetToken}`;
-    
+    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+
     const mailOptions = {
-      from: `"${process.env.APP_NAME || 'Social App'}" <${process.env.SMTP_USER}>`,
+      from: `"${process.env.APP_NAME || 'Nojoom App'}" <${process.env.EMAIL_USER}>`,
       to: user.email,
       subject: 'Reset Your Password',
       html: `
@@ -95,7 +96,7 @@ class EmailService {
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>${process.env.APP_NAME || 'Social App'}</h1>
+                    <h1>${process.env.APP_NAME || 'Nojoom App'}</h1>
                 </div>
                 <div class="content">
                     <h2>Password Reset Request</h2>
@@ -118,8 +119,9 @@ class EmailService {
     };
 
     try {
-      await this.transporter.sendMail(mailOptions);
+      const info = await this.transporter.sendMail(mailOptions);
       console.log('✅ Password reset email sent to:', user.email);
+      console.log('Preview URL:', nodemailer.getTestMessageUrl(info)); // رابط المعاينة في Ethereal
       return true;
     } catch (error) {
       console.error('❌ Error sending password reset email:', error);
