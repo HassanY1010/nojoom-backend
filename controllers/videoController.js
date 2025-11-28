@@ -308,41 +308,76 @@ async uploadVideo(req, res) {
 }
 ,
 
-  async getVideos(req, res) {
-    try {
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 10;
-      const offset = (page - 1) * limit;
+ async getVideos(req, res) {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
 
-      const videos = await Video.getVideos(limit, offset);
+    // 🟣 1. جلب الفيديوهات الأساسية
+    const videos = await Video.getVideos(limit, offset);
 
-      // ✅ إضافة عدد التعليقات لكل فيديو
-      for (let video of videos) {
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
-        );
-        video.comment_count = commentCount[0].count;
+    // 🔵 2. دومين السيرفر لصناعة روابط كاملة
+    const BASE_URL = process.env.SERVER_URL || "https://nojoom-backend.onrender.com";
 
-        // ✅ التأكد من وجود thumbnail افتراضي
-        if (!video.thumbnail) {
-          video.thumbnail = '/default-thumbnail.jpg';
-        }
+    // 🟢 3. تحسين ومعالجة كل فيديو
+    for (let video of videos) {
+      const videoId = video.id;
+
+      // 🔹 A. عدد التعليقات
+      const [commentCount] = await pool.execute(
+        `SELECT COUNT(*) AS count 
+         FROM comments 
+         WHERE video_id = ? AND deleted_by_admin = FALSE`,
+        [videoId]
+      );
+
+      // 🔹 B. عدد اللايكات
+      const [likeCount] = await pool.execute(
+        `SELECT COUNT(*) AS count 
+         FROM video_likes 
+         WHERE video_id = ?`,
+        [videoId]
+      );
+
+      // 🔹 C. عدد المشاركات
+      const [shareCount] = await pool.execute(
+        `SELECT COUNT(*) AS count 
+         FROM video_shares 
+         WHERE video_id = ?`,
+        [videoId]
+      );
+
+      // ⭕ إضافة القيم
+      video.comment_count = commentCount[0].count;
+      video.like_count = likeCount[0].count;
+      video.share_count = shareCount[0].count;
+
+      // 🔹 D. thumbnail افتراضي إذا مفقود
+      if (!video.thumbnail || video.thumbnail === "NULL") {
+        video.thumbnail = "/default-thumbnail.jpg";
       }
 
-      res.json({
-        videos,
-        pagination: {
-          page,
-          limit,
-          hasMore: videos.length === limit
-        }
-      });
-    } catch (error) {
-      console.error('Get videos error:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      // 🔹 E. إنشاء روابط كاملة قابلة للمشاهدة
+      video.full_url = `${BASE_URL}${video.path}`;
+      video.full_thumbnail_url = `${BASE_URL}${video.thumbnail}`;
     }
-  },
+
+    // 🟣 4. الاستجابة النهائية
+    res.json({
+      videos,
+      pagination: {
+        page,
+        limit,
+        hasMore: videos.length === limit
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ Get videos error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+},
 
   async getRecommendedVideos(req, res) {
     try {
