@@ -17,6 +17,7 @@ import chatRoutes from './routes/chatRoutes.js';
 import tokenRoutes from './routes/tokenRoutes.js';
 import exploreRoutes from './routes/exploreRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import authController from './controllers/authController.js';
 import resetPasswordRoutes from "./routes/resetPasswordRoutes.js";
 import usersRoutes from './routes/usersRoutes.js';
 import messagesRoutes from './routes/messagesRoutes.js';
