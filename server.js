@@ -34,6 +34,7 @@ import { initSocket } from './socket/socketManager.js';
 import { ChallengeScheduler } from './services/challengeScheduler.js';
 
 
+
 // Middleware for auth
 import { authenticateToken } from './middleware/authMiddleware.js';
 
@@ -131,7 +132,6 @@ initSocket(server);
 initializeDatabase();
 
 // ==================== Challenge Scheduler ====================
-ChallengeScheduler.start();
 
 // ==================== Start Server ====================
 const PORT = process.env.PORT || 5000;
