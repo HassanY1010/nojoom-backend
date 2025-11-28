@@ -17,7 +17,7 @@ import chatRoutes from './routes/chatRoutes.js';
 import tokenRoutes from './routes/tokenRoutes.js';
 import exploreRoutes from './routes/exploreRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
-import * as authController from './controllers/authController.js';
+import { authController } from './controllers/authController.js';
 import resetPasswordRoutes from "./routes/resetPasswordRoutes.js";
 import usersRoutes from './routes/usersRoutes.js';
 import messagesRoutes from './routes/messagesRoutes.js';
@@ -61,7 +61,7 @@ app.use(morgan('dev'));
 // JSON parsing
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.post("/create-admin", authController.createAdminIfNotExists);
+app.post('/create-admin', authController.createAdminIfNotExists);
 
 // Rate limiting
 const generalLimiter = rateLimit({
