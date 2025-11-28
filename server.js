@@ -943,6 +943,5 @@ process.on('SIGINT', () => {
 
 // ==================== Start the Server ====================
 
-startServer();
 
 export default app;
