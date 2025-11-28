@@ -33,6 +33,7 @@ import { initSocket } from './socket/socketManager.js';
 // Challenge Scheduler
 import { ChallengeScheduler } from './services/ChallengeScheduler.js';
 
+
 // Middleware for auth
 import { authenticateToken } from './middleware/authMiddleware.js';
 
