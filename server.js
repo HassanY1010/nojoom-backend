@@ -34,8 +34,6 @@ import { initSocket } from './socket/socketManager.js';
 // Challenge Scheduler
 import { ChallengeScheduler } from './services/challengeScheduler.js';
 
-
-
 // Middleware for auth
 import { authenticateToken } from './middleware/authMiddleware.js';
 
@@ -126,98 +124,13 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/challenges', challengeRoutes);
 app.use('/api/notifications', notificationRoutes);
 
-// ==================== Socket.io ====================
-initSocket(server);
-
-// ==================== Database ====================
-initializeDatabase();
-
-// ==================== Challenge Scheduler ====================
-
-// ==================== Start Server ====================
-const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
-});
-
-// ==================== Middlewares ====================
-
-// Logging
-if (process.env.NODE_ENV !== 'test') {
-  app.use(morgan('combined'));
-}
-
-// Body parsing with better limits
-app.use(express.json({
-  limit: '50mb',
-  verify: (req, res, buf) => {
-    req.rawBody = buf;
-  }
-}));
-
-app.use(express.urlencoded({
-  extended: true,
-  limit: '50mb',
-  parameterLimit: 10000
-}));
-
 // ==================== Static Files ====================
-
-// ✅ إضافة خدمة ثابتة لملفات thumbnails
-app.use('/thumbnails', express.static(path.join(__dirname, 'thumbnails'), {
-  dotfiles: 'deny',
-  index: false,
-  setHeaders: (res, filePath) => {
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-
-    const ext = path.extname(filePath).toLowerCase();
-    const mimeTypes = {
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.png': 'image/png',
-      '.gif': 'image/gif',
-      '.webp': 'image/webp'
-    };
-
-    if (mimeTypes[ext]) {
-      res.setHeader('Content-Type', mimeTypes[ext]);
-    }
-  }
-}));
-
-// ✅ إصلاح: إعداد خدمة الملفات الثابتة بشكل صحيح
-app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
-  dotfiles: 'deny',
-  index: false,
-  setHeaders: (res, filePath) => {
-    // إضافة رؤوس التحكم بالكاش للصور
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-
-    // تحديد نوع المحتوى بناءً على امتداد الملف
-    const ext = path.extname(filePath).toLowerCase();
-    const mimeTypes = {
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.png': 'image/png',
-      '.gif': 'image/gif',
-      '.webp': 'image/webp',
-      '.mp4': 'video/mp4',
-      '.webm': 'video/webm',
-      '.ogg': 'video/ogg'
-    };
-
-    if (mimeTypes[ext]) {
-      res.setHeader('Content-Type', mimeTypes[ext]);
-    }
-  }
-}));
-
-// ✅ إضافة خدمة ثابتة للملفات الافتراضية
+app.use('/thumbnails', express.static(path.join(__dirname, 'thumbnails')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/default-avatar.png', express.static(path.join(__dirname, 'public', 'default-avatar.png')));
 app.use('/default-thumbnail.jpg', express.static(path.join(__dirname, 'public', 'default-thumbnail.jpg')));
-// ==================== تهيئة السيرفر ====================
+
+// ==================== Start Server ====================
 const startServer = async () => {
   try {
     console.log('🔄 Initializing database...');
@@ -237,10 +150,9 @@ const startServer = async () => {
 
     for (const dir of directories) {
       const dirPath = path.join(__dirname, dir);
-      try {
-        await fs.promises.access(dirPath);
-      } catch {
-        await fs.promises.mkdir(dirPath, { recursive: true });
+      try { await fs.promises.access(dirPath); }
+      catch { 
+        await fs.promises.mkdir(dirPath, { recursive: true }); 
         console.log(`✅ Created directory: ${dir}`);
       }
     }
@@ -260,25 +172,9 @@ const startServer = async () => {
     const HOST = process.env.HOST || '0.0.0.0';
 
     server.listen(PORT, HOST, () => {
-      console.log('='.repeat(70));
       console.log('🚀 NOJOOM SERVER STARTED SUCCESSFULLY');
-      console.log('='.repeat(70));
       console.log(`📍 Port: ${PORT}`);
       console.log(`🌐 Host: ${HOST}`);
-      console.log(`📡 URL: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
-      console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`🛡️ Security: Helmet, Rate Limiting, CORS Enabled`);
-      console.log(`📊 Features: Recommendations, Reports, Real-time Chat, Search`);
-      console.log(`🖼️ Static Files: Avatars, Videos, Thumbnails, Default Images`);
-      console.log('='.repeat(70));
-      console.log(`🔍 Health: http://localhost:${PORT}/api/health`);
-      console.log(`🔎 Search: http://localhost:${PORT}/api/search`);
-      console.log(`🧪 CORS Test: http://localhost:${PORT}/api/cors-test`);
-      console.log(`📈 Metrics: http://localhost:${PORT}/api/metrics`);
-      console.log(`🔗 API Docs: http://localhost:${PORT}/api/docs`);
-      console.log(`🖼️ Static Files: http://localhost:${PORT}/uploads/`);
-      console.log(`🖼️ Thumbnails: http://localhost:${PORT}/thumbnails/`);
-      console.log('='.repeat(70));
 
       // ==================== تهيئة Socket.io ====================
       initSocket(server);
@@ -293,6 +189,8 @@ const startServer = async () => {
   }
 };
 
+// Start the server
+startServer();
 
 
 
