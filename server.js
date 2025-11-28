@@ -31,7 +31,7 @@ import notificationRoutes from './routes/notificationRoutes.js';
 import { initSocket } from './socket/socketManager.js';
 
 // Challenge Scheduler
-import { ChallengeScheduler } from './services/ChallengeScheduler.js';
+import { ChallengeScheduler } from './services/challengeScheduler.js';
 
 
 // Middleware for auth
