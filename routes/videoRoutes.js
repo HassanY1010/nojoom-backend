@@ -39,6 +39,10 @@ router.get('/user/liked', authenticateToken, videoController.getLikedVideos);
 // فيديوهات غير مكتملة
 router.get('/user/incomplete', authenticateToken, videoController.getIncompleteVideos);
 
+// مسارات watch history و interaction
+router.post('/user/watch-history', authenticateToken, videoController.recordWatchHistory);
+router.post('/user/interaction', authenticateToken, videoController.recordInteraction);
+
 // ============================================================
 // 🟥 4) الرفع والحذف Upload / Delete
 // ============================================================
@@ -68,13 +72,9 @@ router.delete('/:videoId/like', authenticateToken, videoController.unlikeVideo);
 // 🟦 6) نظام التوصية RECOMMENDATION ENGINE
 // ============================================================
 
+// ضع المسارات الثابتة قبل أي مسار ديناميكي
 router.get('/recommended', authenticateToken, videoController.getRecommendedVideos);
-
 router.get('/following', authenticateToken, videoController.getFollowingVideos);
-
-router.post('/user/watch-history', authenticateToken, videoController.recordWatchHistory);
-
-router.post('/user/interaction', authenticateToken, videoController.recordInteraction);
 
 // ============================================================
 // 🟪 7) التعليقات COMMENTS
@@ -107,17 +107,16 @@ router.get('/:videoId/processing-status', videoController.getProcessingStatus);
 // ============================================================
 
 router.get('/:videoId/progress', authenticateToken, videoController.getVideoProgress);
-
 router.post('/:videoId/progress', authenticateToken, videoController.saveVideoProgress);
 
 // ============================================================
 // 🟩 10) مسارات عامة PUBLIC ROUTES
 // ============================================================
 
-// كل الفيديوهات (مع الباقيناتشن / روابط كاملة / ثامبنيل)
+// ضع المسار الثابت "/" بعد كل المسارات الثابتة والديناميكية
 router.get('/', videoController.getVideos);
 
-// فيديو واحد بالـ ID
+// مسار الفيديو بالـ ID يجب أن يكون آخر شيء
 router.get('/:id', videoController.getVideo);
 
 export default router;
