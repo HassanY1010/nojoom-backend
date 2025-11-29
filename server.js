@@ -8,16 +8,18 @@ import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
+import cors from 'cors';
+
+// Import DB
+import { initializeDatabase } from './config/db.js';
 
 // Import routes
-import { initializeDatabase } from './config/db.js';
 import authRoutes from './routes/authRoutes.js';
 import videoRoutes from './routes/videoRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
 import tokenRoutes from './routes/tokenRoutes.js';
 import exploreRoutes from './routes/exploreRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
-import { authController } from './controllers/authController.js';
 import resetPasswordRoutes from "./routes/resetPasswordRoutes.js";
 import usersRoutes from './routes/usersRoutes.js';
 import messagesRoutes from './routes/messagesRoutes.js';
@@ -28,87 +30,69 @@ import aiRoutes from './routes/aiRoutes.js';
 import challengeRoutes from './routes/challengeRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 
+// Controllers
+import { authController } from './controllers/authController.js';
+
 // Socket.io
 import { initSocket } from './socket/socketManager.js';
 
-// Challenge Scheduler
+// Scheduler
 import { ChallengeScheduler } from './services/challengeScheduler.js';
-
-// Middleware for auth
-import { authenticateToken } from './middleware/authMiddleware.js';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ======================================================
+// 1. Initialize Express
+// ======================================================
 const app = express();
-const server = createServer(app);
 
-// ==================== Middleware ====================
+// Required for Render / Vercel proxies
+app.set('trust proxy', 1);
 
-// Helmet for security headers
+// ======================================================
+// 2. Global Middlewares
+// ======================================================
+app.use(cors({
+  origin: process.env.CLIENT_URL,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
+}));
+
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   contentSecurityPolicy: false
 }));
 
-// Compression
 app.use(compression());
-
-// Logging
 app.use(morgan('dev'));
-
-// JSON parsing
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Create admin auto (once)
 app.post('/create-admin', authController.createAdminIfNotExists);
 
-// Rate limiting
-const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+// General rate limiting
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,
   max: 1000,
-  message: {
-    error: 'Too many requests from this IP, please try again later.',
-    timestamp: new Date().toISOString()
-  },
   standardHeaders: true,
   legacyHeaders: false
-});
-app.use(generalLimiter);
+}));
 
+// Authentication limiter
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
-  message: {
-    error: 'Too many authentication attempts, please try again later.',
-    timestamp: new Date().toISOString()
-  }
+  standardHeaders: true,
+  legacyHeaders: false
 });
 
-// ==================== CORS Middleware ====================
-const allowedOrigins = [
-  process.env.CLIENT_URL
-].filter(Boolean);
-
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With, Origin, Refresh-Token, X-API-Key');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Max-Age', '86400');
-  res.setHeader('Access-Control-Expose-Headers', 'X-Total-Count, X-Total-Pages');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  next();
-});
-
-// ==================== Routes ====================
+// ======================================================
+// 3. Routes
+// ======================================================
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/videos', videoRoutes);
 app.use('/api/chat', chatRoutes);
@@ -119,25 +103,32 @@ app.use('/api/reset-password', resetPasswordRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/messages', messagesRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/comments', commentRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/challenges', challengeRoutes);
 app.use('/api/notifications', notificationRoutes);
 
-// ==================== Static Files ====================
+// ======================================================
+// 4. Static Files
+// ======================================================
 app.use('/thumbnails', express.static(path.join(__dirname, 'thumbnails')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/default-avatar.png', express.static(path.join(__dirname, 'public', 'default-avatar.png')));
 app.use('/default-thumbnail.jpg', express.static(path.join(__dirname, 'public', 'default-thumbnail.jpg')));
 
-// ==================== Start Server ====================
+// ======================================================
+// 5. Start Server + Database + Socket.IO
+// ======================================================
+const server = createServer(app);
+
 const startServer = async () => {
   try {
     console.log('🔄 Initializing database...');
     await initializeDatabase();
     console.log('✅ Database initialized successfully');
 
-    // إنشاء المجلدات الضرورية
+    // Ensure required directories exist
     const directories = [
       'uploads',
       'uploads/videos',
@@ -150,24 +141,14 @@ const startServer = async () => {
 
     for (const dir of directories) {
       const dirPath = path.join(__dirname, dir);
-      try { await fs.promises.access(dirPath); }
-      catch { 
-        await fs.promises.mkdir(dirPath, { recursive: true }); 
-        console.log(`✅ Created directory: ${dir}`);
+      try {
+        await fs.promises.access(dirPath);
+      } catch {
+        await fs.promises.mkdir(dirPath, { recursive: true });
+        console.log(`📁 Created: ${dir}`);
       }
     }
 
-    // التحقق من الصور الافتراضية
-    const defaultAvatarPath = path.join(__dirname, 'public', 'default-avatar.png');
-    const defaultThumbnailPath = path.join(__dirname, 'public', 'default-thumbnail.jpg');
-
-    try { await fs.promises.access(defaultAvatarPath); }
-    catch { console.log('ℹ️ Default avatar not found, using fallback'); }
-
-    try { await fs.promises.access(defaultThumbnailPath); }
-    catch { console.log('ℹ️ Default thumbnail not found, using fallback'); }
-
-    // ==================== تشغيل السيرفر ====================
     const PORT = process.env.PORT || 5000;
     const HOST = process.env.HOST || '0.0.0.0';
 
@@ -175,13 +156,13 @@ const startServer = async () => {
       console.log('🚀 NOJOOM SERVER STARTED SUCCESSFULLY');
       console.log(`📍 Port: ${PORT}`);
       console.log(`🌐 Host: ${HOST}`);
-
-      // ==================== تهيئة Socket.io ====================
-      initSocket(server);
-
-      // ==================== تهيئة Challenge Scheduler ====================
-      ChallengeScheduler.init();
     });
+
+    // Initialize Socket.IO
+    initSocket(server);
+
+    // Initialize Scheduler
+    ChallengeScheduler.init();
 
   } catch (error) {
     console.error('❌ Failed to start server:', error);
@@ -189,9 +170,7 @@ const startServer = async () => {
   }
 };
 
-// Start the server
 startServer();
-
 
 
 // ==================== Routes ====================
