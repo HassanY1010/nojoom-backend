@@ -1,5 +1,5 @@
 import express from 'express';
-import videoController from '../controllers/videoController.js';
+import { videoController } from '../controllers/videoController.js';
 import { commentController } from '../controllers/commentController.js';
 import { authenticateToken } from '../middleware/authMiddleware.js';
 import { upload } from '../middleware/uploadMiddleware.js';
