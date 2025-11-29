@@ -5,11 +5,15 @@ import path from 'path';
 export class Video {
   // ============ الأساسية ============
   static async create(videoData) {
-    const { user_id, path, thumbnail, description, is_chat_video = false } = videoData;
+    const { user_id, video_url, thumbnail, description, is_public = true } = videoData;
+    
+    // ✅ التأكد من عدم وجود قيم undefined
+    const safeDescription = description || null;
+    const safeThumbnail = thumbnail || '/default-thumbnail.jpg';
     
     const [result] = await pool.execute(
-      'INSERT INTO videos (user_id, path, thumbnail, description, is_chat_video) VALUES (?, ?, ?, ?, ?)',
-      [user_id, path, thumbnail, description, is_chat_video]
+      'INSERT INTO videos (user_id, path, thumbnail, description, is_public) VALUES (?, ?, ?, ?, ?)',
+      [user_id, video_url, safeThumbnail, safeDescription, is_public]
     );
     
     return result.insertId;
@@ -62,7 +66,7 @@ export class Video {
 
       // تحديث عدد المشاركات في الفيديو
       await pool.execute(
-        'UPDATE videos SET shares = shares + 1 WHERE id = ?',
+        'UPDATE videos SET shares = COALESCE(shares, 0) + 1 WHERE id = ?',
         [videoId]
       );
 
@@ -77,7 +81,7 @@ export class Video {
   static async getShareCount(videoId) {
     try {
       const [rows] = await pool.execute(
-        'SELECT shares FROM videos WHERE id = ?',
+        'SELECT COALESCE(shares, 0) as shares FROM videos WHERE id = ?',
         [videoId]
       );
       return rows[0]?.shares || 0;
@@ -111,29 +115,29 @@ export class Video {
     );
     return rows[0];
   }
-static async getVideos(userId = 0, limit = 10, offset = 0) {
-  // تأكد أن القيم أرقام صحيحة
-  const userIdInt = parseInt(userId) || 0;
-  const limitInt = parseInt(limit) || 10;
-  const offsetInt = parseInt(offset) || 0;
 
-  const [rows] = await pool.execute(
-    `SELECT v.*, u.username, u.avatar,
-            COUNT(DISTINCT l.user_id) as likes,
-            EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-     FROM videos v 
-     JOIN users u ON v.user_id = u.id 
-     LEFT JOIN likes l ON v.id = l.video_id
-     WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
-     GROUP BY v.id
-     ORDER BY v.created_at DESC 
-     LIMIT ? OFFSET ?`,
-    [userIdInt, limitInt, offsetInt]
-  );
+  static async getVideos(userId = 0, limit = 10, offset = 0) {
+    // تأكد أن القيم أرقام صحيحة
+    const userIdInt = parseInt(userId) || 0;
+    const limitInt = parseInt(limit) || 10;
+    const offsetInt = parseInt(offset) || 0;
 
-  return rows;
-}
+    const [rows] = await pool.execute(
+      `SELECT v.*, u.username, u.avatar,
+              COUNT(DISTINCT l.user_id) as likes,
+              EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+       FROM videos v 
+       JOIN users u ON v.user_id = u.id 
+       LEFT JOIN likes l ON v.id = l.video_id
+       WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
+       GROUP BY v.id
+       ORDER BY v.created_at DESC 
+       LIMIT ? OFFSET ?`,
+      [userIdInt, limitInt, offsetInt]
+    );
 
+    return rows;
+  }
 
   // ============ نظام التوصية المتقدم ============
   static async getVideosFromFollowingUsers(userId, limit = 10) {
@@ -413,7 +417,7 @@ static async getVideos(userId = 0, limit = 10, offset = 0) {
   // ============ المشاهدات والإعجابات ============
   static async incrementViews(videoId) {
     await pool.execute(
-      'UPDATE videos SET views = views + 1 WHERE id = ? AND deleted_by_admin = FALSE',
+      'UPDATE videos SET views = COALESCE(views, 0) + 1 WHERE id = ? AND deleted_by_admin = FALSE',
       [videoId]
     );
   }
@@ -562,7 +566,7 @@ static async getVideos(userId = 0, limit = 10, offset = 0) {
        FROM videos v 
        JOIN users u ON v.user_id = u.id 
        WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
-       ORDER BY v.views DESC 
+       ORDER BY COALESCE(v.views, 0) DESC 
        LIMIT ?`,
       [limit]
     );
@@ -573,7 +577,7 @@ static async getVideos(userId = 0, limit = 10, offset = 0) {
     const [rows] = await pool.execute(
       `SELECT v.*, u.username, u.avatar,
               COUNT(DISTINCT l.user_id) as likes,
-              v.views / GREATEST(DATEDIFF(NOW(), v.created_at), 1) as engagement_rate
+              COALESCE(v.views, 0) / GREATEST(DATEDIFF(NOW(), v.created_at), 1) as engagement_rate
        FROM videos v
        JOIN users u ON v.user_id = u.id
        LEFT JOIN likes l ON v.id = l.video_id
@@ -601,9 +605,7 @@ static async getVideos(userId = 0, limit = 10, offset = 0) {
   static removeDuplicateVideos(videos) {
     const seen = new Set();
     return videos.filter(video => {
-      if (seen.has(video.id)) {
-        return false;
-      }
+      if (seen.has(video.id)) return false;
       seen.add(video.id);
       return true;
     });
@@ -630,8 +632,8 @@ static async getVideos(userId = 0, limit = 10, offset = 0) {
     try {
       const [rows] = await pool.execute(
         `SELECT 
-           v.views,
-           v.shares,
+           COALESCE(v.views, 0) as views,
+           COALESCE(v.shares, 0) as shares,
            (SELECT COUNT(*) FROM likes WHERE video_id = ?) as likes_count,
            (SELECT COUNT(*) FROM watch_history WHERE video_id = ?) as watches_count,
            (SELECT AVG(watch_time) FROM watch_history WHERE video_id = ?) as avg_watch_time
@@ -665,7 +667,7 @@ static async getVideos(userId = 0, limit = 10, offset = 0) {
              WHEN u.username LIKE ? THEN 2
              ELSE 1
            END) DESC,
-           v.views DESC
+           COALESCE(v.views, 0) DESC
          LIMIT ?`,
         [
           userId || 0,
@@ -716,7 +718,7 @@ static async getVideos(userId = 0, limit = 10, offset = 0) {
            AND v.deleted_by_admin = FALSE 
            AND u.is_banned = FALSE
          GROUP BY v.id
-         ORDER BY v.views DESC
+         ORDER BY COALESCE(v.views, 0) DESC
          LIMIT ?`,
         [0, `%${category}%`, limit]
       );
@@ -757,8 +759,8 @@ static async getVideos(userId = 0, limit = 10, offset = 0) {
     try {
       const [rows] = await pool.execute(
         `SELECT 
-           v.views,
-           v.shares,
+           COALESCE(v.views, 0) as views,
+           COALESCE(v.shares, 0) as shares,
            (SELECT COUNT(*) FROM likes WHERE video_id = ?) as likes,
            (SELECT COUNT(*) FROM watch_history WHERE video_id = ?) as watches,
            (SELECT COUNT(*) FROM user_interactions WHERE video_id = ?) as interactions
@@ -785,10 +787,10 @@ static async getVideos(userId = 0, limit = 10, offset = 0) {
       const [rows] = await pool.execute(
         `SELECT u.id, u.username, u.avatar,
                 COUNT(DISTINCT v.id) as video_count,
-                SUM(v.views) as total_views,
-                SUM(v.shares) as total_shares,
+                SUM(COALESCE(v.views, 0)) as total_views,
+                SUM(COALESCE(v.shares, 0)) as total_shares,
                 COUNT(DISTINCT l.id) as total_likes,
-                (SUM(v.views) + COUNT(DISTINCT l.id) + SUM(v.shares)) as engagement_score
+                (SUM(COALESCE(v.views, 0)) + COUNT(DISTINCT l.id) + SUM(COALESCE(v.shares, 0))) as engagement_score
          FROM users u
          JOIN videos v ON u.id = v.user_id
          LEFT JOIN likes l ON v.id = l.video_id
