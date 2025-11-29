@@ -245,10 +245,17 @@ export const videoController = {
 
       let thumbnailPublicUrl = null;
       const thumbName = `thumb_${uniqueName}.jpg`;
-      const thumbLocal = `temp_${thumbName}`;
+      const thumbLocal = path.join(__dirname, '..', 'temp', thumbName);
 
       try {
-        await ThumbnailService.generateThumbnail(file.path, "./", thumbLocal);
+        // ✅ التأكد من وجود مجلد temp
+        const tempDir = path.join(__dirname, '..', 'temp');
+        if (!fs.existsSync(tempDir)) {
+          fs.mkdirSync(tempDir, { recursive: true });
+        }
+
+        // ✅ استخدام المسار الصحيح للملف المؤقت
+        await ThumbnailService.generateThumbnail(file.path, tempDir, thumbName);
 
         const { error: thumbError } = await supabase.storage
           .from(process.env.SUPABASE_BUCKET)
@@ -262,7 +269,8 @@ export const videoController = {
           .from(process.env.SUPABASE_BUCKET)
           .getPublicUrl(`thumbnails/${thumbName}`).data.publicUrl;
 
-        fs.unlinkSync(thumbLocal);
+        // ✅ حذف الملف المؤقت بعد الرفع
+        if (fs.existsSync(thumbLocal)) fs.unlinkSync(thumbLocal);
         console.log("✅ Thumbnail uploaded:", thumbnailPublicUrl);
       } catch (err) {
         console.error("❌ Thumbnail error:", err);
@@ -277,7 +285,7 @@ export const videoController = {
 
         await pool.execute(
           "UPDATE videos SET video_url = ?, thumbnail = ?, description = ? WHERE id = ? AND user_id = ?",
-          [publicUrl, thumbnailPublicUrl, description, replaceVideoId, req.user.id]
+          [publicUrl, thumbnailPublicUrl, description || null, replaceVideoId, req.user.id]
         );
 
         const updatedVideo = await Video.findById(replaceVideoId);
@@ -769,13 +777,13 @@ export const videoController = {
          watch_time = watch_time + VALUES(watch_time),
          completed = VALUES(completed),
          updated_at = NOW()`,
-        [userId, videoId, watchTime, completed]
+        [userId, videoId, watchTime || 0, completed || false]
       );
 
       // تحديث إحصائيات المستخدم
       await pool.execute(
         'UPDATE users SET total_watch_time = total_watch_time + ? WHERE id = ?',
-        [watchTime, userId]
+        [watchTime || 0, userId]
       );
 
       // تسجيل في نظام التوصية
@@ -785,13 +793,13 @@ export const videoController = {
           userId,
           videoId,
           type: 'watch',
-          weight: completed ? 2.0 : Math.min(watchTime / 60, 1.5),
+          weight: completed ? 2.0 : Math.min((watchTime || 0) / 60, 1.5),
           metadata: { watchTime, completed }
         });
       } catch (recError) {
         console.error('Failed to record watch interaction:', recError);
         // تسجيل بديل في قاعدة البيانات
-        await Video.recordUserInteraction(userId, videoId, 'watch', completed ? 2.0 : Math.min(watchTime / 60, 1.5));
+        await Video.recordUserInteraction(userId, videoId, 'watch', completed ? 2.0 : Math.min((watchTime || 0) / 60, 1.5));
       }
 
       res.json({ message: 'Watch history recorded successfully' });
