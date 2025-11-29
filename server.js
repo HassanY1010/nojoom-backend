@@ -34,7 +34,7 @@ import notificationRoutes from './routes/notificationRoutes.js';
 // Controllers
 import { authController } from './controllers/authController.js';
 
-// Socket.io
+// Socket.io - ✅ تم التعديل لمنع التكرار
 import { initSocket } from './socket/socketManager.js';
 
 // Scheduler
@@ -154,6 +154,9 @@ app.use('/default-thumbnail.jpg', express.static(path.join(__dirname, 'public', 
 // ======================================================
 const server = createServer(app);
 
+// ✅ تم نقل تهيئة Socket.io هنا لمنع التكرار
+let isSocketInitialized = false;
+
 const startServer = async () => {
   try {
     console.log('🔄 Initializing database...');
@@ -183,8 +186,12 @@ const startServer = async () => {
       console.log(`🌍 CORS Enabled for: ${process.env.CLIENT_URL}`);
     });
 
-    // Initialize Socket.IO
-    initSocket(server);
+    // ✅ تهيئة Socket.IO مرة واحدة فقط
+    if (!isSocketInitialized) {
+      initSocket(server);
+      isSocketInitialized = true;
+      console.log('✅ Socket.IO initialized successfully');
+    }
 
     // Initialize Scheduler
     ChallengeScheduler.init();
@@ -243,7 +250,9 @@ app.get('/api/debug/tables', async (req, res) => {
 app.get('/api/user/watch-history', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const { page = 1, limit = 20 } = req.query;
+    // ✅ استخدام قيم افتراضية آمنة
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
 
     console.log('🔄 Fetching watch history for user:', userId);
@@ -296,7 +305,7 @@ app.get('/api/user/watch-history', authenticateToken, async (req, res) => {
          WHERE wh.user_id = ?
          ORDER BY wh.updated_at DESC
          LIMIT ? OFFSET ?`,
-        [userId, parseInt(limit), offset]
+        [userId, limit, offset]
       );
 
       const [totalCount] = await pool.execute(
@@ -331,7 +340,7 @@ app.get('/api/user/watch-history', authenticateToken, async (req, res) => {
          WHERE wh.user_id = ?
          ORDER BY wh.updated_at DESC
          LIMIT ? OFFSET ?`,
-        [userId, parseInt(limit), offset]
+        [userId, limit, offset]
       );
 
       res.json({
@@ -507,11 +516,11 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
 
     const [stats] = await pool.execute(
       `SELECT 
-         followers_count,
-         following_count,
-         likes_count,
-         views_count,
-         total_watch_time,
+         COALESCE(followers_count, 0) as followers_count,
+         COALESCE(following_count, 0) as following_count,
+         COALESCE(likes_count, 0) as likes_count,
+         COALESCE(views_count, 0) as views_count,
+         COALESCE(total_watch_time, 0) as total_watch_time,
          (SELECT COUNT(*) FROM videos WHERE user_id = ? AND deleted_by_admin = FALSE) as videos_count
        FROM users 
        WHERE id = ?`,
@@ -553,8 +562,9 @@ app.get('/api/health', (req, res) => {
       search: true,
       staticFiles: true,
       thumbnails: true,
-      corsFixed: true, // ✅ إضافة تأكيد إصلاح CORS
-      websocketFixed: true // ✅ إضافة تأكيد إصلاح WebSocket
+      corsFixed: true,
+      websocketFixed: true, // ✅ إضافة تأكيد إصلاح WebSocket
+      mysqlFixed: true // ✅ إضافة تأكيد إصلاح MySQL
     },
     system: {
       nodeVersion: process.version,
@@ -654,7 +664,8 @@ app.get('/api/docs', (req, res) => {
       staticFiles: 'Avatar and video file serving',
       thumbnails: 'Automatic thumbnail generation for videos',
       corsFixed: '✅ CORS issues resolved for video upload',
-      websocketFixed: '✅ WebSocket connection issues resolved'
+      websocketFixed: '✅ WebSocket connection issues resolved',
+      mysqlFixed: '✅ MySQL parameters issues resolved'
     }
   });
 });
@@ -833,7 +844,8 @@ app.get('/', (req, res) => {
       thumbnails: 'Automatic thumbnail generation for videos',
       corsFixed: '✅ CORS issues resolved for all endpoints',
       websocketFixed: '✅ WebSocket connection issues resolved',
-      videoUploadFixed: '✅ Video upload issues resolved'
+      videoUploadFixed: '✅ Video upload issues resolved',
+      mysqlFixed: '✅ MySQL parameters issues resolved'
     },
     statistics: {
       activeSince: new Date(Date.now() - process.uptime() * 1000).toISOString(),
@@ -924,8 +936,7 @@ app.use((err, req, res, next) => {
 
 // ==================== Socket.io Initialization ====================
 
-// Initialize Socket.io after routes
-initSocket(server);
+// ✅ تم نقل تهيئة Socket.io إلى أعلى الملف لمنع التكرار
 
 // ==================== Graceful Shutdown ====================
 
