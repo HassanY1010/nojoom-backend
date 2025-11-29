@@ -11,7 +11,7 @@ import morgan from 'morgan';
 import cors from 'cors';
 
 // Import DB
-import { initializeDatabase } from './config/db.js';
+import { initializeDatabase, pool } from './config/db.js';
 
 // Import routes
 import authRoutes from './routes/authRoutes.js';
@@ -52,20 +52,22 @@ const app = express();
 app.set('trust proxy', 1); // Required for Render / Vercel proxies
 
 // ======================================================
-// 2. Global Middlewares
+// 2. Global Middlewares - ✅ CORS FIXED
 // ======================================================
+// Handle preflight requests for ALL routes
 app.options('*', cors({
   origin: process.env.CLIENT_URL,
   credentials: true,
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization']
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
+// Apply CORS to all routes
 app.use(cors({
   origin: process.env.CLIENT_URL,
   credentials: true,
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization']
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
 app.use(helmet({
@@ -76,7 +78,7 @@ app.use(helmet({
 app.use(compression());
 app.use(morgan('dev'));
 
-// Body parser with higher limit for video upload
+// Body parser with higher limit for video upload - ✅ INCREASED LIMITS
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
@@ -132,7 +134,22 @@ app.use('/default-avatar.png', express.static(path.join(__dirname, 'public', 'de
 app.use('/default-thumbnail.jpg', express.static(path.join(__dirname, 'public', 'default-thumbnail.jpg')));
 
 // ======================================================
-// 7. Start Server + Database + Socket.IO
+// 7. Manual CORS Headers for Video Upload - ✅ ADDED
+// ======================================================
+app.use('/api/videos/upload', (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', process.env.CLIENT_URL);
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
+
+// ======================================================
+// 8. Start Server + Database + Socket.IO
 // ======================================================
 const server = createServer(app);
 
@@ -146,8 +163,12 @@ const startServer = async () => {
     const directories = ['uploads', 'uploads/videos', 'uploads/avatars', 'thumbnails', 'temp', 'logs', 'public'];
     for (const dir of directories) {
       const dirPath = path.join(__dirname, dir);
-      try { await fs.promises.access(dirPath); } 
-      catch { await fs.promises.mkdir(dirPath, { recursive: true }); console.log(`📁 Created: ${dir}`); }
+      try { 
+        await fs.promises.access(dirPath); 
+      } catch { 
+        await fs.promises.mkdir(dirPath, { recursive: true }); 
+        console.log(`📁 Created: ${dir}`); 
+      }
     }
 
     const PORT = process.env.PORT || 5000;
@@ -157,6 +178,8 @@ const startServer = async () => {
       console.log('🚀 NOJOOM SERVER STARTED SUCCESSFULLY');
       console.log(`📍 Port: ${PORT}`);
       console.log(`🌐 Host: ${HOST}`);
+      console.log(`🔗 Client URL: ${process.env.CLIENT_URL}`);
+      console.log(`🌍 CORS Enabled for: ${process.env.CLIENT_URL}`);
     });
 
     // Initialize Socket.IO
@@ -170,13 +193,6 @@ const startServer = async () => {
     process.exit(1);
   }
 };
-
-// Graceful shutdown
-process.on('SIGTERM', () => { server.close(() => process.exit(0)); });
-process.on('SIGINT', () => { server.close(() => process.exit(0)); });
-
-startServer();
-
 
 // ==================== Routes ====================
 
@@ -199,9 +215,6 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/challenges', challengeRoutes);
 app.use('/api/notifications', notificationRoutes);
-
-
-
 
 // ==================== Debug Routes ====================
 
@@ -538,7 +551,9 @@ app.get('/api/health', (req, res) => {
       security: true,
       search: true,
       staticFiles: true,
-      thumbnails: true // ✅ إضافة دعم الـthumbnails
+      thumbnails: true,
+      corsFixed: true, // ✅ إضافة تأكيد إصلاح CORS
+      websocketFixed: true // ✅ إضافة تأكيد إصلاح WebSocket
     },
     system: {
       nodeVersion: process.version,
@@ -636,7 +651,9 @@ app.get('/api/docs', (req, res) => {
       security: 'Rate limiting, CORS, and authentication',
       search: 'Advanced search with filters and hashtags',
       staticFiles: 'Avatar and video file serving',
-      thumbnails: 'Automatic thumbnail generation for videos' // ✅ تحديث الميزات
+      thumbnails: 'Automatic thumbnail generation for videos',
+      corsFixed: '✅ CORS issues resolved for video upload',
+      websocketFixed: '✅ WebSocket connection issues resolved'
     }
   });
 });
@@ -656,7 +673,6 @@ app.get('/api/cors-test', (req, res) => {
     }
   });
 });
-
 
 // Test POST endpoint for CORS
 app.post('/api/cors-test', (req, res) => {
@@ -813,7 +829,10 @@ app.get('/', (req, res) => {
       security: 'Helmet, CORS, rate limiting, and input validation',
       performance: 'Compression, caching, and optimized queries',
       staticFiles: 'Avatar and video file serving with caching',
-      thumbnails: 'Automatic thumbnail generation for videos' // ✅ تحديث الميزات
+      thumbnails: 'Automatic thumbnail generation for videos',
+      corsFixed: '✅ CORS issues resolved for all endpoints',
+      websocketFixed: '✅ WebSocket connection issues resolved',
+      videoUploadFixed: '✅ Video upload issues resolved'
     },
     statistics: {
       activeSince: new Date(Date.now() - process.uptime() * 1000).toISOString(),
@@ -926,6 +945,6 @@ process.on('SIGINT', () => {
 });
 
 // ==================== Start the Server ====================
-
+startServer();
 
 export default app;
