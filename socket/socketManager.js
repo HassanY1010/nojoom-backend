@@ -16,9 +16,10 @@ const connectedUsers = new Map();
 export const initSocket = (server) => {
   const io = new Server(server, {
     cors: {
-      origin: [process.env.CLIENT_URL].filter(Boolean), // الرابط يأتي من .env
+      origin: [process.env.CLIENT_URL].filter(Boolean),
       methods: ["GET", "POST"],
-      credentials: true
+      credentials: true,
+      allowedHeaders: ["Content-Type", "Authorization"]
     },
     transports: ['websocket', 'polling'],
     pingTimeout: 60000,
