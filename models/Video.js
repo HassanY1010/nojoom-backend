@@ -111,23 +111,29 @@ export class Video {
     );
     return rows[0];
   }
+static async getVideos(userId = 0, limit = 10, offset = 0) {
+  // تأكد أن القيم أرقام صحيحة
+  const userIdInt = parseInt(userId) || 0;
+  const limitInt = parseInt(limit) || 10;
+  const offsetInt = parseInt(offset) || 0;
 
-  static async getVideos(limit = 10, offset = 0) {
-    const [rows] = await pool.execute(
-      `SELECT v.*, u.username, u.avatar,
-              COUNT(DISTINCT l.user_id) as likes,
-              EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-       FROM videos v 
-       JOIN users u ON v.user_id = u.id 
-       LEFT JOIN likes l ON v.id = l.video_id
-       WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
-       GROUP BY v.id
-       ORDER BY v.created_at DESC 
-       LIMIT ? OFFSET ?`,
-      [0, limit, offset]
-    );
-    return rows;
-  }
+  const [rows] = await pool.execute(
+    `SELECT v.*, u.username, u.avatar,
+            COUNT(DISTINCT l.user_id) as likes,
+            EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+     FROM videos v 
+     JOIN users u ON v.user_id = u.id 
+     LEFT JOIN likes l ON v.id = l.video_id
+     WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
+     GROUP BY v.id
+     ORDER BY v.created_at DESC 
+     LIMIT ? OFFSET ?`,
+    [userIdInt, limitInt, offsetInt]
+  );
+
+  return rows;
+}
+
 
   // ============ نظام التوصية المتقدم ============
   static async getVideosFromFollowingUsers(userId, limit = 10) {
