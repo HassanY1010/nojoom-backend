@@ -89,64 +89,61 @@ export const videoController = {
 
   // ✅ الحصول على فيديوهات المستخدم مع إمكانية الفرز
   async getUserVideos(req, res) {
-    try {
-      const { userId } = req.params;
-      const { sortBy = 'latest' } = req.query;
+  try {
+    const { userId } = req.params;
+    const { sortBy = 'latest' } = req.query;
 
-      console.log(`🔄 Fetching user videos for ${userId}, sort by: ${sortBy}`);
-
-      let orderBy = 'v.created_at DESC';
-      switch (sortBy) {
-        case 'trending':
-          orderBy = 'v.views DESC, v.likes DESC, v.shares DESC';
-          break;
-        case 'oldest':
-          orderBy = 'v.created_at ASC';
-          break;
-        case 'latest':
-        default:
-          orderBy = 'v.created_at DESC';
-      }
-
-      const [videos] = await pool.execute(
-        `SELECT v.*, u.username, u.avatar,
-                COUNT(DISTINCT l.user_id) as likes,
-                EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-         FROM videos v
-         JOIN users u ON v.user_id = u.id
-         LEFT JOIN likes l ON v.id = l.video_id
-         WHERE v.user_id = ? AND v.deleted_by_admin = FALSE
-         GROUP BY v.id
-         ORDER BY ${orderBy}`,
-        [req.user?.id || 0, userId]
-      );
-
-      // ✅ إضافة عدد التعليقات لكل فيديو
-      for (let video of videos) {
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
-        );
-        video.comment_count = commentCount[0].count;
-
-        // ✅ التأكد من وجود thumbnail افتراضي إذا لم يكن موجوداً
-        if (!video.thumbnail) {
-          video.thumbnail = '/default-thumbnail.jpg';
-        }
-      }
-
-      res.json({
-        success: true,
-        videos: videos || []
-      });
-    } catch (error) {
-      console.error('❌ Get user videos error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch user videos'
-      });
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID is required' });
     }
-  },
+
+    const targetUserId = parseInt(userId);
+    const reqUserId = parseInt(req.user?.id) || 0;
+
+    let orderBy = 'v.created_at DESC';
+    switch (sortBy) {
+      case 'trending':
+        orderBy = 'v.views DESC, v.likes DESC, v.shares DESC';
+        break;
+      case 'oldest':
+        orderBy = 'v.created_at ASC';
+        break;
+      case 'latest':
+      default:
+        orderBy = 'v.created_at DESC';
+    }
+
+    const [videos] = await pool.execute(
+      `SELECT v.*, u.username, u.avatar,
+              COUNT(DISTINCT l.user_id) as likes,
+              EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+       FROM videos v
+       JOIN users u ON v.user_id = u.id
+       LEFT JOIN likes l ON v.id = l.video_id
+       WHERE v.user_id = ? AND v.deleted_by_admin = FALSE
+       GROUP BY v.id
+       ORDER BY ${orderBy}`,
+      [reqUserId, targetUserId]
+    );
+
+    for (let video of videos) {
+      const [commentCount] = await pool.execute(
+        'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
+        [video.id]
+      );
+      video.comment_count = commentCount[0].count;
+      if (!video.thumbnail) {
+        video.thumbnail = '/default-thumbnail.jpg';
+      }
+    }
+
+    res.json({ success: true, videos: videos || [] });
+
+  } catch (error) {
+    console.error('❌ Get user videos error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch user videos' });
+  }
+},
 
   // ✅ تسجيل مشاهدة الفيديو
   async addView(req, res) {
