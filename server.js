@@ -18,6 +18,7 @@ import authRoutes from './routes/authRoutes.js';
 import videoRoutes from './routes/videoRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
 import tokenRoutes from './routes/tokenRoutes.js';
+import { authenticateToken } from './middleware/authMiddleware.js';
 import exploreRoutes from './routes/exploreRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import resetPasswordRoutes from "./routes/resetPasswordRoutes.js";
