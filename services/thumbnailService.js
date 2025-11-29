@@ -16,6 +16,13 @@ export class ThumbnailService {
       try {
         console.log('🖼️ Generating thumbnail for:', videoPath);
         
+        // ✅ التأكد من وجود الملف قبل البدء
+        if (!fs.existsSync(videoPath)) {
+          console.error('❌ Video file not found:', videoPath);
+          const defaultThumbnail = this.createDefaultThumbnail(outputDir, filename);
+          return resolve(defaultThumbnail);
+        }
+
         // التأكد من وجود مجلد thumbnails
         if (!fs.existsSync(outputDir)) {
           fs.mkdirSync(outputDir, { recursive: true });
@@ -52,28 +59,43 @@ export class ThumbnailService {
     try {
       const defaultThumbnailPath = path.join(outputDir, `${filename}.jpg`);
       
-      // إنشاء صورة افتراضية بسيطة (يمكن استبدالها بصورة افتراضية جاهزة)
-      const canvas = require('canvas').createCanvas(640, 360);
-      const ctx = canvas.getContext('2d');
-      
-      // خلفية متدرجة
-      const gradient = ctx.createLinearGradient(0, 0, 640, 360);
-      gradient.addColorStop(0, '#1e3a8a');
-      gradient.addColorStop(1, '#7e22ce');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, 640, 360);
-      
-      // إضافة أيقونة فيديو
-      ctx.fillStyle = 'white';
-      ctx.font = 'bold 48px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('🎬', 320, 180);
-      
-      // حفظ الصورة
-      const buffer = canvas.toBuffer('image/jpeg');
-      fs.writeFileSync(defaultThumbnailPath, buffer);
-      
-      console.log('✅ Default thumbnail created:', defaultThumbnailPath);
+      // ✅ التأكد من وجود المجلد
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+
+      // ✅ استخدام canvas بشكل صحيح في ES Modules
+      import('canvas').then(({ createCanvas }) => {
+        const canvas = createCanvas(640, 360);
+        const ctx = canvas.getContext('2d');
+        
+        // خلفية متدرجة
+        const gradient = ctx.createLinearGradient(0, 0, 640, 360);
+        gradient.addColorStop(0, '#1e3a8a');
+        gradient.addColorStop(1, '#7e22ce');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 640, 360);
+        
+        // إضافة أيقونة فيديو
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 48px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('🎬', 320, 180);
+        
+        // حفظ الصورة
+        const buffer = canvas.toBuffer('image/jpeg');
+        fs.writeFileSync(defaultThumbnailPath, buffer);
+        
+        console.log('✅ Default thumbnail created:', defaultThumbnailPath);
+      }).catch(error => {
+        console.error('❌ Canvas import failed:', error);
+        // نسخ صورة افتراضية موجودة
+        const defaultSource = path.join(__dirname, '..', 'public', 'default-thumbnail.jpg');
+        if (fs.existsSync(defaultSource)) {
+          fs.copyFileSync(defaultSource, defaultThumbnailPath);
+        }
+      });
+
       return `/thumbnails/${filename}.jpg`;
     } catch (error) {
       console.error('❌ Failed to create default thumbnail:', error);
@@ -86,6 +108,12 @@ export class ThumbnailService {
       try {
         if (!fs.existsSync(outputDir)) {
           fs.mkdirSync(outputDir, { recursive: true });
+        }
+
+        // ✅ التأكد من وجود الملف
+        if (!fs.existsSync(videoPath)) {
+          console.error('❌ Video file not found for multiple thumbnails:', videoPath);
+          return resolve([]);
         }
 
         // الحصول على مدة الفيديو أولاً
