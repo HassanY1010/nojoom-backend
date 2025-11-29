@@ -1,9 +1,10 @@
 import { Video } from '../models/Video.js';
 import { pool } from '../config/db.js';
-import path from 'path';
+import path, { join, dirname } from 'path';
 import fs from 'fs';
 import { ThumbnailService } from '../services/thumbnailService.js';
 import { createClient } from '@supabase/supabase-js';
+import { fileURLToPath } from 'url';
 
 // ✅ استيراد Supabase
 import { createClient } from '@supabase/supabase-js';
@@ -206,200 +207,88 @@ export const videoController = {
 
   // ==================== دوال الرفع والحصول على الفيديوهات ====================
   async uploadVideo(req, res) {
+  try {
+    if (!req.file) return res.status(400).json({ error: "Video file is required" });
+
+    const { description, replaceVideoId } = req.body;
+    const file = req.file;
+    const extension = file.originalname.split(".").pop();
+    const uniqueName = `${Date.now()}_${Math.random().toString(36).substr(2)}.${extension}`;
+
+    // -----------------------
+    // رفع الفيديو إلى Supabase
+    // -----------------------
+    const { error: uploadError } = await supabase.storage
+      .from(process.env.SUPABASE_BUCKET)
+      .upload(uniqueName, fs.createReadStream(file.path), { contentType: file.mimetype });
+
+    if (uploadError) throw uploadError;
+
+    const publicUrl = supabase.storage
+      .from(process.env.SUPABASE_BUCKET)
+      .getPublicUrl(uniqueName).data.publicUrl;
+
+    if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+
+    // -----------------------
+    // توليد الـ Thumbnail
+    // -----------------------
+    let thumbnailPublicUrl = null;
+    const thumbName = `thumb_${uniqueName}.jpg`;
+    const tempDir = join(__dirname, '..', 'temp');
+    const thumbLocal = join(tempDir, thumbName);
+
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+
     try {
-      console.log("🚀 Upload video request received");
+      await ThumbnailService.generateThumbnail(file.path, tempDir, thumbName);
 
-      if (!req.file) {
-        return res.status(400).json({ error: "Video file is required" });
-      }
-
-      const { description, replaceVideoId } = req.body;
-
-      // معلومات الفيديو
-      const file = req.file;
-      const extension = file.originalname.split(".").pop();
-      const uniqueName = `${Date.now()}_${Math.random().toString(36).substr(2)}.${extension}`;
-
-      console.log("📦 Uploading to Supabase:", uniqueName);
-
-      // ✅ رفع الفيديو إلى Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      const { error: thumbError } = await supabase.storage
         .from(process.env.SUPABASE_BUCKET)
-        .upload(uniqueName, fs.createReadStream(file.path), {
-          contentType: file.mimetype,
-        });
+        .upload(`thumbnails/${thumbName}`, fs.createReadStream(thumbLocal), { contentType: "image/jpeg" });
 
-      if (uploadError) {
-        console.error("❌ Supabase upload failed:", uploadError);
-        return res.status(500).json({ error: "Failed to upload video to storage" });
-      }
+      if (thumbError) throw thumbError;
 
-      // جلب الرابط العام للفيديو
-      const publicUrl = supabase.storage
+      thumbnailPublicUrl = supabase.storage
         .from(process.env.SUPABASE_BUCKET)
-        .getPublicUrl(uniqueName).data.publicUrl;
+        .getPublicUrl(`thumbnails/${thumbName}`).data.publicUrl;
 
-      console.log("🌍 Public video URL:", publicUrl);
+      if (fs.existsSync(thumbLocal)) fs.unlinkSync(thumbLocal);
 
-      // حذف الملف من السيرفر بعد رفعه
-      if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-
-      // -----------------------
-      // 🔥 توليد Thumbnail
-      // -----------------------
-      console.log("🖼 Generating thumbnail...");
-
-      let thumbnailPublicUrl = null;
-      const thumbName = `thumb_${uniqueName}.jpg`;
-      const thumbLocal = path.join(__dirname, '..', 'temp', thumbName);
-
-      try {
-        // ✅ التأكد من وجود مجلد temp
-        const tempDir = path.join(__dirname, '..', 'temp');
-        if (!fs.existsSync(tempDir)) {
-          fs.mkdirSync(tempDir, { recursive: true });
-        }
-
-        // ✅ استخدام المسار الصحيح للملف المؤقت
-        await ThumbnailService.generateThumbnail(file.path, tempDir, thumbName);
-
-        const { error: thumbError } = await supabase.storage
-          .from(process.env.SUPABASE_BUCKET)
-          .upload(`thumbnails/${thumbName}`, fs.createReadStream(thumbLocal), {
-            contentType: "image/jpeg",
-          });
-
-        if (thumbError) throw thumbError;
-
-        thumbnailPublicUrl = supabase.storage
-          .from(process.env.SUPABASE_BUCKET)
-          .getPublicUrl(`thumbnails/${thumbName}`).data.publicUrl;
-
-        // ✅ حذف الملف المؤقت بعد الرفع
-        if (fs.existsSync(thumbLocal)) fs.unlinkSync(thumbLocal);
-        console.log("✅ Thumbnail uploaded:", thumbnailPublicUrl);
-      } catch (err) {
-        console.error("❌ Thumbnail error:", err);
-        thumbnailPublicUrl = "/default-thumbnail.jpg";
-      }
-
-      // -----------------------
-      // 🔁 لو يوجد replaceVideoId
-      // -----------------------
-      if (replaceVideoId) {
-        console.log("🔁 Replacing video:", replaceVideoId);
-
-        await pool.execute(
-          "UPDATE videos SET video_url = ?, thumbnail = ?, description = ? WHERE id = ? AND user_id = ?",
-          [publicUrl, thumbnailPublicUrl, description || null, replaceVideoId, req.user.id]
-        );
-
-        const updatedVideo = await Video.findById(replaceVideoId);
-
-        return res.status(200).json({
-          message: "Video replaced successfully",
-          video: updatedVideo,
-        });
-      }
-
-      // -----------------------
-      // 📌 حفظ الفيديو الجديد في MySQL
-      // -----------------------
-      const videoId = await Video.create({
-        user_id: req.user.id,
-        video_url: publicUrl,
-        thumbnail: thumbnailPublicUrl,
-        description: description || "",
-        is_public: true,
-      });
-
-      const video = await Video.findById(videoId);
-
-      return res.status(201).json({
-        message: "Video uploaded successfully",
-        video,
-      });
-
-    } catch (error) {
-      console.error("❌ Upload error:", error);
-      return res.status(500).json({ error: "Internal server error" });
+    } catch (err) {
+      console.error("❌ Thumbnail error:", err);
+      thumbnailPublicUrl = "/default-thumbnail.jpg";
     }
-  },
 
-  async getVideos(req, res) {
-    try {
-      // ✅ استخدام قيم افتراضية آمنة
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 10;
-      const offset = (page - 1) * limit;
-      const userId = req.user?.id || 0;
-
-      console.log('🔍 Fetching videos with params:', { page, limit, offset, userId });
-
-      // 🟣 1. جلب الفيديوهات الأساسية
-      const videos = await Video.getVideos(limit, offset, userId);
-
-      // 🔵 2. دومين السيرفر لصناعة روابط كاملة
-      const BASE_URL = process.env.SERVER_URL || "https://nojoom-backend.onrender.com";
-
-      // 🟢 3. تحسين ومعالجة كل فيديو
-      for (let video of videos) {
-        const videoId = video.id;
-
-        // 🔹 A. عدد التعليقات
-        const [commentCount] = await pool.execute(
-          `SELECT COUNT(*) AS count 
-           FROM comments 
-           WHERE video_id = ? AND deleted_by_admin = FALSE`,
-          [videoId]
-        );
-
-        // 🔹 B. عدد اللايكات
-        const [likeCount] = await pool.execute(
-          `SELECT COUNT(*) AS count 
-           FROM likes 
-           WHERE video_id = ?`,
-          [videoId]
-        );
-
-        // 🔹 C. عدد المشاركات
-        const [shareCount] = await pool.execute(
-          `SELECT COUNT(*) AS count 
-           FROM video_shares 
-           WHERE video_id = ?`,
-          [videoId]
-        );
-
-        // ⭕ إضافة القيم
-        video.comment_count = commentCount[0].count;
-        video.like_count = likeCount[0].count;
-        video.share_count = shareCount[0].count;
-
-        // 🔹 D. thumbnail افتراضي إذا مفقود
-        if (!video.thumbnail || video.thumbnail === "NULL") {
-          video.thumbnail = "/default-thumbnail.jpg";
-        }
-
-        // 🔹 E. إنشاء روابط كاملة قابلة للمشاهدة
-        video.full_url = `${BASE_URL}${video.path}`;
-        video.full_thumbnail_url = `${BASE_URL}${video.thumbnail}`;
-      }
-
-      // 🟣 4. الاستجابة النهائية
-      res.json({
-        videos,
-        pagination: {
-          page,
-          limit,
-          hasMore: videos.length === limit
-        }
-      });
-
-    } catch (error) {
-      console.error("❌ Get videos error:", error);
-      res.status(500).json({ error: "Internal server error" });
+    // -----------------------
+    // حفظ الفيديو أو استبداله
+    // -----------------------
+    if (replaceVideoId) {
+      await pool.execute(
+        "UPDATE videos SET video_url = ?, thumbnail = ?, description = ? WHERE id = ? AND user_id = ?",
+        [publicUrl, thumbnailPublicUrl, description || null, replaceVideoId, req.user.id]
+      );
+      const updatedVideo = await Video.findById(replaceVideoId);
+      return res.status(200).json({ message: "Video replaced successfully", video: updatedVideo });
     }
-  },
+
+    const videoId = await Video.create({
+      user_id: req.user.id,
+      video_url: publicUrl,
+      thumbnail: thumbnailPublicUrl,
+      description: description || "",
+      is_public: true,
+    });
+
+    const video = await Video.findById(videoId);
+    return res.status(201).json({ message: "Video uploaded successfully", video });
+
+  } catch (error) {
+    console.error("❌ Upload error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+},
+
 
   async getRecommendedVideos(req, res) {
     try {
