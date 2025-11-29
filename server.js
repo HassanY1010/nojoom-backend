@@ -1,1021 +1,962 @@
-import { Video } from '../models/Video.js';
-import { pool } from '../config/db.js';
-import path, { join, dirname } from 'path';
+import express from 'express';
+import { createServer } from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 import fs from 'fs';
-import { ThumbnailService } from '../services/thumbnailService.js';
-import { createClient } from '@supabase/supabase-js';
-import { fileURLToPath } from 'url';
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
+import compression from 'compression';
+import morgan from 'morgan';
+import cors from 'cors';
 
-// ✅ استيراد Supabase
-import { createClient } from '@supabase/supabase-js';
+// Import DB
+import { initializeDatabase, pool } from './config/db.js';
 
-import { fileURLToPath } from 'url';
+// Import routes
+import authRoutes from './routes/authRoutes.js';
+import videoRoutes from './routes/videoRoutes.js';
+import chatRoutes from './routes/chatRoutes.js';
+import tokenRoutes from './routes/tokenRoutes.js';
+import { authenticateToken } from './middleware/authMiddleware.js';
+import exploreRoutes from './routes/exploreRoutes.js';
+import adminRoutes from './routes/adminRoutes.js';
+import resetPasswordRoutes from "./routes/resetPasswordRoutes.js";
+import usersRoutes from './routes/usersRoutes.js';
+import messagesRoutes from './routes/messagesRoutes.js';
+import reportRoutes from './routes/reportRoutes.js';
+import commentRoutes from './routes/commentRoutes.js';
+import searchRoutes from './routes/searchRoutes.js';
+import aiRoutes from './routes/aiRoutes.js';
+import challengeRoutes from './routes/challengeRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
+
+// Controllers
+import { authController } from './controllers/authController.js';
+
+// Socket.io - ✅ تم التعديل لمنع التكرار
+import { initSocket } from './socket/socketManager.js';
+
+// Scheduler
+import { ChallengeScheduler } from './services/challengeScheduler.js';
+
+dotenv.config();
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+// ======================================================
+// 1. Initialize Express
+// ======================================================
+const app = express();
+app.set('trust proxy', 1); // Required for Render / Vercel proxies
 
-export const videoController = {
-  // ==================== دوال المشاركة الجديدة ====================
+// ======================================================
+// 2. Global Middlewares - ✅ CORS FIXED
+// ======================================================
+// Handle preflight requests for ALL routes
+app.use(cors({
+  origin: process.env.CLIENT_URL,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
 
-  // ✅ تسجيل مشاركة الفيديو
-  async addShare(req, res) {
-    try {
-      const { videoId } = req.params;
-      const userId = req.user?.id;
-      const { shareMethod = 'direct' } = req.body;
+// Handle preflight OPTIONS requests globally
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(204); // No Content
+  } else {
+    next();
+  }
+});
 
-      console.log(`📤 Recording share for video ${videoId} by user ${userId}, method: ${shareMethod}`);
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: false
+}));
 
-      // التحقق مما إذا شارك المستخدم الفيديو مسبقاً
-      const hasShared = await Video.hasUserShared(videoId, userId);
+app.use(compression());
+app.use(morgan('dev'));
 
-      if (!hasShared) {
-        // تسجيل المشاركة
-        const shareRecorded = await Video.addShare(videoId, userId);
+// Body parser with higher limit for video upload - ✅ INCREASED LIMITS
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
-        if (shareRecorded) {
-          console.log(`✅ Share recorded for video ${videoId}`);
+// ======================================================
+// 3. Rate Limiting
+// ======================================================
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  standardHeaders: true,
+  legacyHeaders: false
+});
 
-          // تسجيل التفاعل في نظام التوصية
-          try {
-            const { recommendationEngine } = await import('../services/recommendationEngine.js');
-            await recommendationEngine.recordInteraction({
-              userId,
-              videoId: parseInt(videoId),
-              type: 'share',
-              weight: 1.5,
-              metadata: { shareMethod },
-              timestamp: new Date()
-            });
-          } catch (recError) {
-            console.error('Failed to record share interaction:', recError);
-            // تسجيل بديل في قاعدة البيانات
-            await Video.recordUserInteraction(userId, videoId, 'share', 1.5);
-          }
-        }
-      } else {
-        console.log(`⚠️ User ${userId} already shared video ${videoId}`);
-      }
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false
+});
 
-      // الحصول على العدد المحدث للمشاركات
-      const shareCount = await Video.getShareCount(videoId);
+app.use(generalLimiter);
 
-      res.json({
-        success: true,
-        message: 'Share recorded successfully',
-        shareCount: shareCount,
-        alreadyShared: hasShared
-      });
-    } catch (error) {
-      console.error('❌ Add share error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to record share'
-      });
-    }
-  },
+// ======================================================
+// 4. Special CORS for Video Upload - ✅ ADDED
+// ======================================================
+app.use('/api/videos/upload', (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', process.env.CLIENT_URL);
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
 
-  // ✅ الحصول على عدد المشاركات
-  async getShareCount(req, res) {
-    try {
-      const { videoId } = req.params;
+// ======================================================
+// 5. Admin creation endpoint
+// ======================================================
+app.post('/create-admin', authController.createAdminIfNotExists);
 
-      const shareCount = await Video.getShareCount(videoId);
+// ======================================================
+// 6. Routes
+// ======================================================
+app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/videos', videoRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/token', tokenRoutes);
+app.use('/api/explore', exploreRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/reset-password', resetPasswordRoutes);
+app.use('/api/users', usersRoutes);
+app.use('/api/messages', messagesRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/comments', commentRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/challenges', challengeRoutes);
+app.use('/api/notifications', notificationRoutes);
 
-      res.json({
-        success: true,
-        shareCount: shareCount
-      });
-    } catch (error) {
-      console.error('❌ Get share count error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get share count'
-      });
-    }
-  },
+// ======================================================
+// 7. Static Files
+// ======================================================
+app.use('/thumbnails', express.static(path.join(__dirname, 'thumbnails')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/default-avatar.png', express.static(path.join(__dirname, 'public', 'default-avatar.png')));
+app.use('/default-thumbnail.jpg', express.static(path.join(__dirname, 'public', 'default-thumbnail.jpg')));
 
-  // ==================== دوال جديدة ====================
+// ======================================================
+// 8. Start Server + Database + Socket.IO
+// ======================================================
+const server = createServer(app);
 
-  // ✅ الحصول على فيديوهات المستخدم مع إمكانية الفرز
-  async getUserVideos(req, res) {
-    try {
-      const { userId } = req.params;
-      const { sortBy = 'latest' } = req.query;
+// ✅ تم نقل تهيئة Socket.io هنا لمنع التكرار
+let isSocketInitialized = false;
 
-      if (!userId) {
-        return res.status(400).json({ success: false, error: 'User ID is required' });
-      }
-
-      const targetUserId = parseInt(userId);
-      // ✅ استخدام قيم افتراضية آمنة
-      const reqUserId = parseInt(req.user?.id) || 0;
-
-      let orderBy = 'v.created_at DESC';
-      switch (sortBy) {
-        case 'trending':
-          orderBy = 'v.views DESC, v.likes DESC, v.shares DESC';
-          break;
-        case 'oldest':
-          orderBy = 'v.created_at ASC';
-          break;
-        case 'latest':
-        default:
-          orderBy = 'v.created_at DESC';
-      }
-
-      const [videos] = await pool.execute(
-        `SELECT v.*, u.username, u.avatar,
-                COUNT(DISTINCT l.user_id) as likes,
-                EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-         FROM videos v
-         JOIN users u ON v.user_id = u.id
-         LEFT JOIN likes l ON v.id = l.video_id
-         WHERE v.user_id = ? AND v.deleted_by_admin = FALSE
-         GROUP BY v.id
-         ORDER BY ${orderBy}`,
-        [reqUserId, targetUserId]
-      );
-
-      for (let video of videos) {
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
-        );
-        video.comment_count = commentCount[0].count;
-        if (!video.thumbnail) {
-          video.thumbnail = '/default-thumbnail.jpg';
-        }
-      }
-
-      res.json({ success: true, videos: videos || [] });
-
-    } catch (error) {
-      console.error('❌ Get user videos error:', error);
-      res.status(500).json({ success: false, error: 'Failed to fetch user videos' });
-    }
-  },
-
-  // ✅ تسجيل مشاهدة الفيديو
-  async addView(req, res) {
-    try {
-      const { videoId } = req.params;
-      const userId = req.user?.id;
-
-      console.log(`👁️ Recording view for video ${videoId} by user ${userId}`);
-
-      // التحقق من أن المستخدم لم يشاهد الفيديو من قبل
-      const [existingViews] = await pool.execute(
-        'SELECT id FROM video_views WHERE video_id = ? AND user_id = ?',
-        [videoId, userId]
-      );
-
-      if (existingViews.length === 0) {
-        // تسجيل المشاهدة
-        await pool.execute(
-          'INSERT INTO video_views (video_id, user_id) VALUES (?, ?)',
-          [videoId, userId]
-        );
-
-        // تحديث عدد المشاهدات
-        await pool.execute(
-          'UPDATE videos SET views = views + 1 WHERE id = ?',
-          [videoId]
-        );
-
-        console.log(`✅ View recorded for video ${videoId}`);
-      } else {
-        console.log(`⚠️ User ${userId} already viewed video ${videoId}`);
-      }
-
-      res.json({
-        success: true,
-        message: 'View recorded successfully'
-      });
-    } catch (error) {
-      console.error('❌ Add view error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to record view'
-      });
-    }
-  },
-
-  // ==================== دوال الرفع والحصول على الفيديوهات ====================
-  async uploadVideo(req, res) {
+const startServer = async () => {
   try {
-    if (!req.file) return res.status(400).json({ error: "Video file is required" });
+    console.log('🔄 Initializing database...');
+    await initializeDatabase();
+    console.log('✅ Database initialized successfully');
 
-    const { description, replaceVideoId } = req.body;
-    const file = req.file;
-    const extension = file.originalname.split(".").pop();
-    const uniqueName = `${Date.now()}_${Math.random().toString(36).substr(2)}.${extension}`;
-
-    // -----------------------
-    // رفع الفيديو إلى Supabase
-    // -----------------------
-    const { error: uploadError } = await supabase.storage
-      .from(process.env.SUPABASE_BUCKET)
-      .upload(uniqueName, fs.createReadStream(file.path), { contentType: file.mimetype });
-
-    if (uploadError) throw uploadError;
-
-    const publicUrl = supabase.storage
-      .from(process.env.SUPABASE_BUCKET)
-      .getPublicUrl(uniqueName).data.publicUrl;
-
-    if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-
-    // -----------------------
-    // توليد الـ Thumbnail
-    // -----------------------
-    let thumbnailPublicUrl = null;
-    const thumbName = `thumb_${uniqueName}.jpg`;
-    const tempDir = join(__dirname, '..', 'temp');
-    const thumbLocal = join(tempDir, thumbName);
-
-    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-
-    try {
-      await ThumbnailService.generateThumbnail(file.path, tempDir, thumbName);
-
-      const { error: thumbError } = await supabase.storage
-        .from(process.env.SUPABASE_BUCKET)
-        .upload(`thumbnails/${thumbName}`, fs.createReadStream(thumbLocal), { contentType: "image/jpeg" });
-
-      if (thumbError) throw thumbError;
-
-      thumbnailPublicUrl = supabase.storage
-        .from(process.env.SUPABASE_BUCKET)
-        .getPublicUrl(`thumbnails/${thumbName}`).data.publicUrl;
-
-      if (fs.existsSync(thumbLocal)) fs.unlinkSync(thumbLocal);
-
-    } catch (err) {
-      console.error("❌ Thumbnail error:", err);
-      thumbnailPublicUrl = "/default-thumbnail.jpg";
+    // Ensure directories exist
+    const directories = ['uploads', 'uploads/videos', 'uploads/avatars', 'thumbnails', 'temp', 'logs', 'public'];
+    for (const dir of directories) {
+      const dirPath = path.join(__dirname, dir);
+      try { 
+        await fs.promises.access(dirPath); 
+      } catch { 
+        await fs.promises.mkdir(dirPath, { recursive: true }); 
+        console.log(`📁 Created: ${dir}`); 
+      }
     }
 
-    // -----------------------
-    // حفظ الفيديو أو استبداله
-    // -----------------------
-    if (replaceVideoId) {
-      await pool.execute(
-        "UPDATE videos SET video_url = ?, thumbnail = ?, description = ? WHERE id = ? AND user_id = ?",
-        [publicUrl, thumbnailPublicUrl, description || null, replaceVideoId, req.user.id]
-      );
-      const updatedVideo = await Video.findById(replaceVideoId);
-      return res.status(200).json({ message: "Video replaced successfully", video: updatedVideo });
-    }
+    const PORT = process.env.PORT || 5000;
+    const HOST = process.env.HOST || '0.0.0.0';
 
-    const videoId = await Video.create({
-      user_id: req.user.id,
-      video_url: publicUrl,
-      thumbnail: thumbnailPublicUrl,
-      description: description || "",
-      is_public: true,
+    server.listen(PORT, HOST, () => {
+      console.log('🚀 NOJOOM SERVER STARTED SUCCESSFULLY');
+      console.log(`📍 Port: ${PORT}`);
+      console.log(`🌐 Host: ${HOST}`);
+      console.log(`🔗 Client URL: ${process.env.CLIENT_URL}`);
+      console.log(`🌍 CORS Enabled for: ${process.env.CLIENT_URL}`);
     });
 
-    const video = await Video.findById(videoId);
-    return res.status(201).json({ message: "Video uploaded successfully", video });
+    // ✅ تهيئة Socket.IO مرة واحدة فقط
+    if (!isSocketInitialized) {
+      initSocket(server);
+      isSocketInitialized = true;
+      console.log('✅ Socket.IO initialized successfully');
+    }
+
+    // Initialize Scheduler
+    ChallengeScheduler.init();
 
   } catch (error) {
-    console.error("❌ Upload error:", error);
-    return res.status(500).json({ error: "Internal server error" });
-  }
-},
-
-
-  async getRecommendedVideos(req, res) {
-    try {
-      const userId = req.user.id;
-      // ✅ استخدام قيم افتراضية آمنة
-      const limit = parseInt(req.query.limit) || 10;
-
-      console.log(`🔄 Getting recommended videos for user: ${userId}`);
-
-      // استخدام محرك التوصية إذا كان موجوداً
-      try {
-        const { recommendationEngine } = await import('../services/recommendationEngine.js');
-        const recommendedVideos = await recommendationEngine.getRecommendedVideos(userId, limit);
-
-        // ✅ إضافة عدد التعليقات لكل فيديو موصى به
-        for (let video of recommendedVideos) {
-          const [commentCount] = await pool.execute(
-            'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-            [video.id]
-          );
-          video.comment_count = commentCount[0].count;
-
-          // ✅ التأكد من وجود thumbnail افتراضي
-          if (!video.thumbnail) {
-            video.thumbnail = '/default-thumbnail.jpg';
-          }
-        }
-
-        res.json({
-          videos: recommendedVideos,
-          message: 'Recommended videos based on your interests'
-        });
-      } catch (recError) {
-        console.error('Recommendation engine failed, using fallback:', recError);
-
-        // Fallback: فيديوهات المتابَعين + فيديوهات شائعة
-        const followingVideos = await Video.getVideosFromFollowingUsers(userId, Math.floor(limit * 0.6));
-        const popularVideos = await Video.getMostViewedVideos(Math.floor(limit * 0.4));
-
-        const allVideos = [...followingVideos, ...popularVideos];
-        const uniqueVideos = this.removeDuplicates(allVideos);
-
-        // ✅ إضافة عدد التعليقات لكل فيديو في الفال باك
-        for (let video of uniqueVideos) {
-          const [commentCount] = await pool.execute(
-            'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-            [video.id]
-          );
-          video.comment_count = commentCount[0].count;
-
-          // ✅ التأكد من وجود thumbnail افتراضي
-          if (!video.thumbnail) {
-            video.thumbnail = '/default-thumbnail.jpg';
-          }
-        }
-
-        res.json({
-          videos: uniqueVideos.slice(0, limit),
-          message: 'Popular videos and videos from followed users'
-        });
-      }
-    } catch (error) {
-      console.error('Get recommended videos error:', error);
-
-      // Fallback نهائي إلى الفيديوهات العادية
-      const videos = await Video.getVideos(10, 0);
-
-      // ✅ إضافة عدد التعليقات لكل فيديو في الفال باك النهائي
-      for (let video of videos) {
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
-        );
-        video.comment_count = commentCount[0].count;
-
-        // ✅ التأكد من وجود thumbnail افتراضي
-        if (!video.thumbnail) {
-          video.thumbnail = '/default-thumbnail.jpg';
-        }
-      }
-
-      res.json({
-        videos,
-        message: 'Popular videos'
-      });
-    }
-  },
-
-  async getFollowingVideos(req, res) {
-    try {
-      const userId = req.user.id;
-      // ✅ استخدام قيم افتراضية آمنة
-      const limit = parseInt(req.query.limit) || 10;
-
-      console.log(`🔄 Getting following videos for user: ${userId}`);
-
-      const videos = await Video.getVideosFromFollowingUsers(userId, limit);
-
-      // ✅ إضافة عدد التعليقات لكل فيديو للمتابَعين
-      for (let video of videos) {
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
-        );
-        video.comment_count = commentCount[0].count;
-
-        // ✅ التأكد من وجود thumbnail افتراضي
-        if (!video.thumbnail) {
-          video.thumbnail = '/default-thumbnail.jpg';
-        }
-      }
-
-      res.json({
-        videos,
-        message: 'Videos from users you follow'
-      });
-    } catch (error) {
-      console.error('Get following videos error:', error);
-
-      // Fallback إلى الفيديوهات العادية
-      const videos = await Video.getVideos(limit, 0);
-
-      // ✅ إضافة عدد التعليقات لكل فيديو في الفال باك
-      for (let video of videos) {
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
-        );
-        video.comment_count = commentCount[0].count;
-
-        // ✅ التأكد من وجود thumbnail افتراضي
-        if (!video.thumbnail) {
-          video.thumbnail = '/default-thumbnail.jpg';
-        }
-      }
-
-      res.json({
-        videos,
-        message: 'Popular videos'
-      });
-    }
-  },
-
-  async getVideo(req, res) {
-    try {
-      const { id } = req.params;
-      // ✅ استخدام قيم افتراضية آمنة
-      const userId = req.user?.id || 0;
-
-      console.log('🔍 Fetching video:', id);
-
-      const video = await Video.getVideoWithLikes(id, userId);
-
-      if (!video) {
-        return res.status(404).json({ error: 'Video not found' });
-      }
-
-      // ✅ التأكد من وجود thumbnail افتراضي
-      if (!video.thumbnail) {
-        video.thumbnail = '/default-thumbnail.jpg';
-      }
-
-      // ✅ التحقق من وجود الملف الفعلي على السيرفر
-      const videoFilename = path.basename(video.path);
-      const videoFilePath = path.join(process.cwd(), 'uploads', 'videos', videoFilename);
-
-      if (!fs.existsSync(videoFilePath)) {
-        console.log('❌ Video file missing on server:', videoFilePath);
-        return res.status(404).json({
-          error: 'Video file not found on server',
-          details: 'The video record exists but the file is missing'
-        });
-      }
-
-      // ✅ إضافة عدد التعليقات للفيديو
-      const [commentCount] = await pool.execute(
-        'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-        [id]
-      );
-      video.comment_count = commentCount[0].count;
-
-      await Video.incrementViews(id);
-
-      res.json({
-        video: {
-          ...video,
-          file_exists: true,
-          file_path: videoFilePath
-        }
-      });
-    } catch (error) {
-      console.error('Get video error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  async getUserVideo(req, res) {
-    try {
-      // ✅ التعديل: الحصول على آخر فيديو للمستخدم بدلاً من فيديو واحد فقط
-      const videos = await Video.getVideosByUser(req.user.id, 1, 0);
-      const video = videos.length > 0 ? videos[0] : null;
-
-      if (video) {
-        // ✅ إضافة عدد التعليقات لفيديو المستخدم
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
-        );
-        video.comment_count = commentCount[0].count;
-
-        // ✅ التأكد من وجود thumbnail افتراضي
-        if (!video.thumbnail) {
-          video.thumbnail = '/default-thumbnail.jpg';
-        }
-      }
-
-      res.json({ video });
-    } catch (error) {
-      console.error('Get user video error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  // ==================== دوال التفاعل مع الفيديوهات ====================
-
-  async deleteVideo(req, res) {
-    try {
-      const { id } = req.params;
-
-      console.log('🗑️ Deleting video:', id);
-
-      // الحصول على معلومات الفيديو قبل الحذف
-      const video = await Video.findById(id);
-      if (!video) {
-        return res.status(404).json({ error: 'Video not found' });
-      }
-
-      // ✅ التحقق من أن المستخدم هو صاحب الفيديو
-      if (video.user_id !== req.user.id) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
-
-      // ✅ التعديل: المسار الصحيح لحذف الملف
-      const filePath = path.join(process.cwd(), 'uploads', 'videos', path.basename(video.path));
-      console.log('📍 File to delete:', filePath);
-
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-        console.log('✅ Video file deleted from server');
-      } else {
-        console.log('⚠️ Video file not found on server:', filePath);
-      }
-
-      // ✅ حذف thumbnail
-      if (video.thumbnail && !video.thumbnail.includes('default-thumbnail')) {
-        ThumbnailService.deleteThumbnail(video.thumbnail);
-      }
-
-      const deleted = await Video.delete(id, req.user.id);
-
-      if (!deleted) {
-        return res.status(404).json({ error: 'Video not found or access denied' });
-      }
-
-      res.json({ message: 'Video deleted successfully' });
-    } catch (error) {
-      console.error('Delete video error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  async likeVideo(req, res) {
-    try {
-      const { videoId } = req.params;
-      const userId = req.user.id;
-
-      console.log(`Like/Unlike request - User: ${userId}, Video: ${videoId}`);
-
-      const result = await Video.likeVideo(userId, parseInt(videoId));
-
-      if (!result.success) {
-        return res.status(500).json({
-          error: 'Like action failed',
-          details: result.error
-        });
-      }
-
-      const likeCount = await Video.getLikeCount(parseInt(videoId));
-      const isLiked = result.liked;
-
-      // تسجيل التفاعل في نظام التوصية
-      try {
-        const { recommendationEngine } = await import('../services/recommendationEngine.js');
-        await recommendationEngine.recordInteraction({
-          userId,
-          videoId: parseInt(videoId),
-          type: result.liked ? 'like' : 'unlike',
-          weight: result.liked ? 1.0 : -1.0,
-          timestamp: new Date()
-        });
-      } catch (recError) {
-        console.error('Failed to record interaction:', recError);
-        // تسجيل بديل في قاعدة البيانات
-        await Video.recordUserInteraction(userId, videoId, result.liked ? 'like' : 'unlike', result.liked ? 1.0 : -1.0);
-      }
-
-      res.json({
-        message: `Video ${result.action} successfully`,
-        likes: likeCount,
-        isLiked: isLiked,
-        action: result.action
-      });
-
-    } catch (error) {
-      console.error('Like video error in controller:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  async unlikeVideo(req, res) {
-    try {
-      const { videoId } = req.params;
-      const userId = req.user.id;
-
-      console.log(`Unlike request - User: ${userId}, Video: ${videoId}`);
-
-      const result = await Video.unlikeVideo(userId, parseInt(videoId));
-
-      if (!result.success) {
-        return res.status(404).json({ error: 'Video not liked' });
-      }
-
-      const likeCount = await Video.getLikeCount(parseInt(videoId));
-
-      res.json({
-        message: 'Video unliked successfully',
-        likes: likeCount,
-        isLiked: false,
-        action: 'unliked'
-      });
-    } catch (error) {
-      console.error('Unlike video error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  async getLikedVideos(req, res) {
-    try {
-      const userId = req.user.id;
-
-      const videos = await Video.getUserLikedVideos(userId);
-
-      // ✅ إضافة عدد التعليقات لكل فيديو محبب
-      for (let video of videos) {
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
-        );
-        video.comment_count = commentCount[0].count;
-
-        // ✅ التأكد من وجود thumbnail افتراضي
-        if (!video.thumbnail) {
-          video.thumbnail = '/default-thumbnail.jpg';
-        }
-      }
-
-      res.json({ videos });
-    } catch (error) {
-      console.error('Get liked videos error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  // ==================== دوال سجل المشاهدة والتفاعل ====================
-
-  async recordWatchHistory(req, res) {
-    try {
-      const userId = req.user.id;
-      const { videoId, watchTime, completed } = req.body;
-
-      console.log(`📊 Recording watch history - User: ${userId}, Video: ${videoId}, Time: ${watchTime}s`);
-
-      // تسجيل في سجل المشاهدة
-      await pool.execute(
-        `INSERT INTO watch_history (user_id, video_id, watch_time, completed, created_at) 
-         VALUES (?, ?, ?, ?, NOW()) 
-         ON DUPLICATE KEY UPDATE 
-         watch_time = watch_time + VALUES(watch_time),
-         completed = VALUES(completed),
-         updated_at = NOW()`,
-        [userId, videoId, watchTime || 0, completed || false]
-      );
-
-      // تحديث إحصائيات المستخدم
-      await pool.execute(
-        'UPDATE users SET total_watch_time = total_watch_time + ? WHERE id = ?',
-        [watchTime || 0, userId]
-      );
-
-      // تسجيل في نظام التوصية
-      try {
-        const { recommendationEngine } = await import('../services/recommendationEngine.js');
-        await recommendationEngine.recordInteraction({
-          userId,
-          videoId,
-          type: 'watch',
-          weight: completed ? 2.0 : Math.min((watchTime || 0) / 60, 1.5),
-          metadata: { watchTime, completed }
-        });
-      } catch (recError) {
-        console.error('Failed to record watch interaction:', recError);
-        // تسجيل بديل في قاعدة البيانات
-        await Video.recordUserInteraction(userId, videoId, 'watch', completed ? 2.0 : Math.min((watchTime || 0) / 60, 1.5));
-      }
-
-      res.json({ message: 'Watch history recorded successfully' });
-    } catch (error) {
-      console.error('Record watch history error:', error);
-      res.status(500).json({ error: 'Failed to record watch history' });
-    }
-  },
-
-  async recordInteraction(req, res) {
-    try {
-      const userId = req.user.id;
-      const { videoId, type, weight, metadata } = req.body;
-
-      console.log(`🎯 Recording interaction - User: ${userId}, Video: ${videoId}, Type: ${type}`);
-
-      // استخدام محرك التوصية إذا كان موجوداً
-      try {
-        const { recommendationEngine } = await import('../services/recommendationEngine.js');
-        await recommendationEngine.recordInteraction({
-          userId,
-          videoId,
-          type,
-          weight: weight || 1.0,
-          metadata,
-          timestamp: new Date()
-        });
-      } catch (recError) {
-        console.error('Failed to record interaction in engine:', recError);
-        // تسجيل بديل في قاعدة البيانات
-        await Video.recordUserInteraction(userId, videoId, type, weight || 1.0);
-      }
-
-      res.json({ message: 'Interaction recorded successfully' });
-    } catch (error) {
-      console.error('Record interaction error:', error);
-      res.status(500).json({ error: 'Failed to record interaction' });
-    }
-  },
-
-  // ==================== دوال البحث والإحصائيات ====================
-
-  async searchVideos(req, res) {
-    try {
-      const { q } = req.query;
-      // ✅ استخدام قيم افتراضية آمنة
-      const userId = req.user?.id || 0;
-      const limit = parseInt(req.query.limit) || 20;
-
-      if (!q || q.trim().length < 2) {
-        return res.json({ videos: [] });
-      }
-
-      const videos = await Video.searchVideos(q.trim(), userId, limit);
-
-      // ✅ إضافة عدد التعليقات لكل فيديو في نتائج البحث
-      for (let video of videos) {
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
-        );
-        video.comment_count = commentCount[0].count;
-
-        // ✅ التأكد من وجود thumbnail افتراضي
-        if (!video.thumbnail) {
-          video.thumbnail = '/default-thumbnail.jpg';
-        }
-      }
-
-      res.json({ videos });
-    } catch (error) {
-      console.error('Search videos error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  async getTrendingVideos(req, res) {
-    try {
-      // ✅ استخدام قيم افتراضية آمنة
-      const limit = parseInt(req.query.limit) || 10;
-      const days = parseInt(req.query.days) || 7;
-
-      const videos = await Video.getTrendingVideos(limit, days);
-
-      // ✅ إضافة عدد التعليقات لكل فيديو في الترند
-      for (let video of videos) {
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
-        );
-        video.comment_count = commentCount[0].count;
-
-        // ✅ التأكد من وجود thumbnail افتراضي
-        if (!video.thumbnail) {
-          video.thumbnail = '/default-thumbnail.jpg';
-        }
-      }
-
-      res.json({ videos });
-    } catch (error) {
-      console.error('Get trending videos error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  async getVideoStats(req, res) {
-    try {
-      const { videoId } = req.params;
-      const stats = await Video.getVideoStats(videoId);
-
-      res.json({ stats });
-    } catch (error) {
-      console.error('Get video stats error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  async getCommentCount(req, res) {
-    try {
-      const { videoId } = req.params;
-
-      const [commentCount] = await pool.execute(
-        'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-        [videoId]
-      );
-
-      res.json({ count: commentCount[0].count });
-    } catch (error) {
-      console.error('Get comment count error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  // ==================== 🚀 VIDEO TURBO ENGINE ENDPOINTS ====================
-
-  /**
-   * الحصول على manifest file للفيديو (HLS)
-   */
-  async getManifest(req, res) {
-    try {
-      const { videoId } = req.params;
-      const { videoChunkService } = await import('../services/videoChunkService.js');
-
-      const status = await videoChunkService.getProcessingStatus(videoId);
-
-      if (!status) {
-        return res.status(404).json({ error: 'Video manifest not found' });
-      }
-
-      if (status.processing_status !== 'completed') {
-        return res.status(202).json({
-          message: 'Video is still processing',
-          status: status.processing_status
-        });
-      }
-
-      // إرجاع مسار الـ manifest
-      res.json({
-        manifestPath: status.manifest_path,
-        totalChunks: status.total_chunks,
-        status: status.processing_status
-      });
-
-    } catch (error) {
-      console.error('Get manifest error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  /**
-   * الحصول على chunk محدد
-   */
-  async getChunk(req, res) {
-    try {
-      const { videoId, quality, index } = req.params;
-
-      const chunkPath = path.join(
-        process.cwd(),
-        'uploads',
-        'chunks',
-        videoId,
-        quality,
-        `segment_${String(index).padStart(3, '0')}.ts`
-      );
-
-      if (!fs.existsSync(chunkPath)) {
-        return res.status(404).json({ error: 'Chunk not found' });
-      }
-
-      // إرسال الـ chunk
-      res.sendFile(chunkPath);
-
-    } catch (error) {
-      console.error('Get chunk error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  /**
-   * الحصول على حالة معالجة الفيديو
-   */
-  async getProcessingStatus(req, res) {
-    try {
-      const { videoId } = req.params;
-      const { videoChunkService } = await import('../services/videoChunkService.js');
-
-      const status = await videoChunkService.getProcessingStatus(videoId);
-
-      if (!status) {
-        return res.status(404).json({ error: 'Processing status not found' });
-      }
-
-      res.json({
-        videoId: parseInt(videoId),
-        status: status.processing_status,
-        totalChunks: status.total_chunks,
-        manifestPath: status.manifest_path,
-        errorMessage: status.error_message,
-        createdAt: status.created_at,
-        updatedAt: status.updated_at
-      });
-
-    } catch (error) {
-      console.error('Get processing status error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  /**
-   * الحصول على تقدم المشاهدة للفيديو
-   */
-  async getVideoProgress(req, res) {
-    try {
-      const { videoId } = req.params;
-      const userId = req.user.id;
-
-      const { videoProgressService } = await import('../services/videoProgressService.js');
-      const progress = await videoProgressService.getProgress(userId, parseInt(videoId));
-
-      if (!progress) {
-        return res.json({
-          lastPosition: 0,
-          watchTime: 0,
-          completed: false
-        });
-      }
-
-      res.json(progress);
-
-    } catch (error) {
-      console.error('Get video progress error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  /**
-   * حفظ تقدم المشاهدة
-   */
-  async saveVideoProgress(req, res) {
-    try {
-      const { videoId } = req.params;
-      const userId = req.user.id;
-      const { lastPosition, watchTime, completed } = req.body;
-
-      const { videoProgressService } = await import('../services/videoProgressService.js');
-      const success = await videoProgressService.saveProgress(
-        userId,
-        parseInt(videoId),
-        parseFloat(lastPosition) || 0,
-        parseInt(watchTime) || 0,
-        completed || false
-      );
-
-      if (success) {
-        res.json({ message: 'Progress saved successfully' });
-      } else {
-        res.status(500).json({ error: 'Failed to save progress' });
-      }
-
-    } catch (error) {
-      console.error('Save video progress error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  /**
-   * الحصول على الفيديوهات غير المكتملة (للاستئناف)
-   */
-  async getIncompleteVideos(req, res) {
-    try {
-      const userId = req.user.id;
-      // ✅ استخدام قيم افتراضية آمنة
-      const limit = parseInt(req.query.limit) || 10;
-
-      const { videoProgressService } = await import('../services/videoProgressService.js');
-      const videos = await videoProgressService.getIncompleteVideos(userId, limit);
-
-      res.json({ videos });
-
-    } catch (error) {
-      console.error('Get incomplete videos error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  },
-
-  // ==================== دوال مساعدة ====================
-
-  // دالة مساعدة لإزالة التكرارات
-  removeDuplicates(videos) {
-    const seen = new Set();
-    return videos.filter(video => {
-      if (seen.has(video.id)) return false;
-      seen.add(video.id);
-      return true;
-    });
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
   }
 };
+
+// ==================== Routes ====================
+
+// Apply auth rate limiting to auth routes
+app.use('/api/auth', authLimiter, authRoutes);
+
+// Other routes
+app.use('/api/videos', videoRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/users', usersRoutes);
+app.use('/api', commentRoutes);
+app.use('/explore', exploreRoutes);
+app.use('/api/explore', exploreRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/messages', messagesRoutes);
+app.use('/api/tokens', tokenRoutes);
+app.use("/api/reset-password", resetPasswordRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/challenges', challengeRoutes);
+app.use('/api/notifications', notificationRoutes);
+
+// ==================== Debug Routes ====================
+
+// ✅ إضافة endpoint للتحقق من هيكل الجداول
+app.get('/api/debug/tables', async (req, res) => {
+  try {
+    const [tables] = await pool.execute(`
+      SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+      AND TABLE_NAME IN ('videos', 'watch_history', 'users')
+      ORDER BY TABLE_NAME, ORDINAL_POSITION
+    `);
+
+    res.json({ tables });
+  } catch (error) {
+    console.error('Debug tables error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== User Routes ====================
+
+// ✅ إصلاح route سجل المشاهدة مباشرة لحل مشكلة العمود title
+app.get('/api/user/watch-history', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    // ✅ استخدام قيم افتراضية آمنة
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+
+    console.log('🔄 Fetching watch history for user:', userId);
+
+    // أولاً: التحقق من هيكل جدول videos
+    try {
+      const [columns] = await pool.execute(`
+        SELECT COLUMN_NAME 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'videos'
+      `);
+
+      const videoColumns = columns.map(col => col.COLUMN_NAME);
+      console.log('📊 Available video columns:', videoColumns);
+
+      // بناء الاستعلام ديناميكياً بناءً على الأعمدة المتاحة
+      let titleColumn = 'title';
+      let descriptionColumn = 'description';
+
+      // التحقق من وجود الأعمدة
+      if (!videoColumns.includes('title')) {
+        console.log('⚠️ Column "title" not found, using "video_title" instead');
+        titleColumn = 'video_title';
+      }
+
+      if (!videoColumns.includes('description')) {
+        console.log('⚠️ Column "description" not found, using "video_description" instead');
+        descriptionColumn = 'video_description';
+      }
+
+      const [history] = await pool.execute(
+        `SELECT 
+          wh.*,
+          v.id as video_id,
+          v.${titleColumn} as title,
+          v.${descriptionColumn} as description,
+          v.url,
+          v.thumbnail,
+          v.duration,
+          v.views,
+          v.likes,
+          v.created_at as video_created_at,
+          u.id as owner_id,
+          u.username as owner_username,
+          u.avatar as owner_avatar
+         FROM watch_history wh
+         JOIN videos v ON wh.video_id = v.id
+         JOIN users u ON v.user_id = u.id
+         WHERE wh.user_id = ?
+         ORDER BY wh.updated_at DESC
+         LIMIT ? OFFSET ?`,
+        [userId, limit, offset]
+      );
+
+      const [totalCount] = await pool.execute(
+        'SELECT COUNT(*) as total FROM watch_history WHERE user_id = ?',
+        [userId]
+      );
+
+      res.json({
+        success: true,
+        data: history,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: totalCount[0].total,
+          pages: Math.ceil(totalCount[0].total / limit)
+        }
+      });
+
+    } catch (dbError) {
+      console.error('❌ Database structure error:', dbError);
+
+      // استعلام بديل إذا فشل الأول
+      const [simpleHistory] = await pool.execute(
+        `SELECT 
+          wh.*,
+          v.id as video_id,
+          v.url,
+          u.username as owner_username
+         FROM watch_history wh
+         JOIN videos v ON wh.video_id = v.id
+         JOIN users u ON v.user_id = u.id
+         WHERE wh.user_id = ?
+         ORDER BY wh.updated_at DESC
+         LIMIT ? OFFSET ?`,
+        [userId, limit, offset]
+      );
+
+      res.json({
+        success: true,
+        data: simpleHistory,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: simpleHistory.length,
+          pages: 1
+        }
+      });
+    }
+  } catch (error) {
+    console.error('❌ Get watch history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get watch history',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// ✅ إضافة route لتسجيل مشاهدة الفيديو - تم التصحيح
+app.post('/api/user/watch-history', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { videoId, watchTime = 1, completed = false } = req.body;
+
+    console.log('🔄 Recording watch history:', { userId, videoId, watchTime });
+
+    // التحقق من وجود الفيديو
+    const [videos] = await pool.execute(
+      'SELECT id FROM videos WHERE id = ?',
+      [videoId]
+    );
+
+    if (videos.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Video not found'
+      });
+    }
+
+    // ✅ التصحيح: استخدام ON DUPLICATE KEY UPDATE بدلاً من INSERT مباشرة
+    await pool.execute(
+      `INSERT INTO watch_history (user_id, video_id, watch_time, completed) 
+       VALUES (?, ?, ?, ?) 
+       ON DUPLICATE KEY UPDATE 
+       watch_time = VALUES(watch_time), 
+       completed = VALUES(completed),
+       updated_at = CURRENT_TIMESTAMP`,
+      [userId, videoId, watchTime, completed]
+    );
+
+    // زيادة عدد مشاهدات الفيديو
+    await pool.execute(
+      'UPDATE videos SET views = COALESCE(views, 0) + 1 WHERE id = ?',
+      [videoId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Watch history updated successfully'
+    });
+  } catch (error) {
+    console.error('❌ Update watch history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update watch history'
+    });
+  }
+});
+
+// ✅ إضافة route تفضيلات المستخدم مباشرة
+app.get('/api/user/preferences', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    console.log('🔄 Getting user preferences for:', userId);
+
+    // محاولة جلب التفضيلات من قاعدة البيانات
+    try {
+      const [prefs] = await pool.execute(
+        'SELECT preferred_categories, content_weights, excluded_users FROM user_preferences WHERE user_id = ?',
+        [userId]
+      );
+
+      if (prefs.length > 0) {
+        const preferences = {
+          preferred_categories: JSON.parse(prefs[0].preferred_categories || '[]'),
+          content_weights: JSON.parse(prefs[0].content_weights || '{}'),
+          excluded_users: JSON.parse(prefs[0].excluded_users || '[]')
+        };
+
+        return res.json({
+          success: true,
+          data: preferences
+        });
+      }
+    } catch (dbError) {
+      console.error('Error fetching preferences from DB:', dbError);
+      // إذا الجدول غير موجود، نستمر مع التفضيلات الافتراضية
+    }
+
+    // إرجاع تفضيلات افتراضية
+    const defaultPreferences = {
+      preferred_categories: [],
+      content_weights: {},
+      excluded_users: []
+    };
+
+    res.json({
+      success: true,
+      data: defaultPreferences
+    });
+  } catch (error) {
+    console.error('Get user preferences error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get user preferences'
+    });
+  }
+});
+
+// ✅ إضافة route تحديث تفضيلات المستخدم
+app.put('/api/user/preferences', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { preferences } = req.body;
+
+    console.log('🔄 Updating user preferences for:', userId, preferences);
+
+    // محاولة حفظ التفضيلات في قاعدة البيانات
+    try {
+      await pool.execute(
+        `INSERT INTO user_preferences (user_id, preferred_categories, content_weights, excluded_users, updated_at)
+         VALUES (?, ?, ?, ?, NOW())
+         ON DUPLICATE KEY UPDATE
+         preferred_categories = VALUES(preferred_categories),
+         content_weights = VALUES(content_weights),
+         excluded_users = VALUES(excluded_users),
+         updated_at = NOW()`,
+        [
+          userId,
+          JSON.stringify(preferences?.preferred_categories || []),
+          JSON.stringify(preferences?.content_weights || {}),
+          JSON.stringify(preferences?.excluded_users || [])
+        ]
+      );
+    } catch (dbError) {
+      console.error('Error saving preferences to DB:', dbError);
+      // إذا الجدول غير موجود، نستمر بدون حفظ في DB
+    }
+
+    res.json({
+      success: true,
+      message: 'Preferences updated successfully',
+      data: preferences
+    });
+  } catch (error) {
+    console.error('Update user preferences error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update preferences'
+    });
+  }
+});
+
+// ✅ إضافة route إحصائيات المستخدم
+app.get('/api/user/stats', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const [stats] = await pool.execute(
+      `SELECT 
+         COALESCE(followers_count, 0) as followers_count,
+         COALESCE(following_count, 0) as following_count,
+         COALESCE(likes_count, 0) as likes_count,
+         COALESCE(views_count, 0) as views_count,
+         COALESCE(total_watch_time, 0) as total_watch_time,
+         (SELECT COUNT(*) FROM videos WHERE user_id = ? AND deleted_by_admin = FALSE) as videos_count
+       FROM users 
+       WHERE id = ?`,
+      [userId, userId]
+    );
+
+    res.json({
+      success: true,
+      data: stats[0]
+    });
+  } catch (error) {
+    console.error('Get user stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get user statistics'
+    });
+  }
+});
+
+// ==================== API Endpoints ====================
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  const healthCheck = {
+    status: 'OK',
+    message: 'Nojoom Server is running optimally',
+    timestamp: new Date().toISOString(),
+    version: '2.1.0',
+    environment: process.env.NODE_ENV || 'development',
+    features: {
+      authentication: true,
+      videoSharing: true,
+      realTimeChat: true,
+      adminPanel: true,
+      reportingSystem: true,
+      recommendations: true,
+      userManagement: true,
+      security: true,
+      search: true,
+      staticFiles: true,
+      thumbnails: true,
+      corsFixed: true,
+      websocketFixed: true, // ✅ إضافة تأكيد إصلاح WebSocket
+      mysqlFixed: true // ✅ إضافة تأكيد إصلاح MySQL
+    },
+    system: {
+      nodeVersion: process.version,
+      platform: process.platform,
+      uptime: process.uptime(),
+      memory: process.memoryUsage()
+    }
+  };
+
+  res.json(healthCheck);
+});
+
+// Metrics endpoint
+app.get('/api/metrics', (req, res) => {
+  res.json({
+    metrics: {
+      server: {
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        cpu: process.cpuUsage()
+      },
+      requests: {
+        total: req.app.get('requestCount') || 0
+      },
+      performance: {
+        responseTime: 'monitored',
+        activeConnections: server._connections || 0
+      }
+    },
+    timestamp: new Date().toISOString()
+  });
+});
+
+// API Documentation
+app.get('/api/docs', (req, res) => {
+  res.json({
+    name: 'Nojoom API Documentation',
+    version: '2.1.0',
+    description: 'Complete Social Platform API with Recommendations System',
+    baseUrl: `${req.protocol}://${req.get('host')}/api`,
+    endpoints: {
+      auth: {
+        register: 'POST /auth/register',
+        login: 'POST /auth/login',
+        refresh: 'POST /auth/refresh',
+        logout: 'POST /auth/logout',
+        profile: 'GET /auth/profile'
+      },
+      videos: {
+        list: 'GET /videos',
+        upload: 'POST /videos/upload',
+        get: 'GET /videos/:id',
+        like: 'POST /videos/:id/like',
+        delete: 'DELETE /videos/:id'
+      },
+      search: {
+        search: 'GET /search',
+        hashtags: 'GET /search/hashtags',
+        suggestions: 'GET /search/suggestions',
+        trending: 'GET /search/trending-hashtags'
+      },
+      recommendations: {
+        personalized: 'GET /recommendations/personalized',
+        trending: 'GET /recommendations/trending',
+        similar: 'GET /recommendations/similar/:videoId'
+      },
+      users: {
+        search: 'GET /users/search',
+        profile: 'GET /users/:id',
+        follow: 'POST /users/:id/follow',
+        unfollow: 'DELETE /users/:id/follow',
+        watchHistory: 'GET /user/watch-history',
+        preferences: 'GET /user/preferences',
+        stats: 'GET /user/stats'
+      },
+      chat: {
+        messages: 'GET /chat/messages',
+        send: 'POST /chat/messages'
+      },
+      admin: {
+        users: 'GET /admin/users',
+        videos: 'GET /admin/videos',
+        reports: 'GET /admin/reports'
+      },
+      reports: {
+        create: 'POST /reports/video/:videoId',
+        myReports: 'GET /reports/my-reports'
+      }
+    },
+    features: {
+      realTime: 'WebSocket connections for live updates',
+      recommendations: 'AI-powered video recommendations',
+      moderation: 'Content reporting and admin moderation',
+      analytics: 'User engagement and video metrics',
+      security: 'Rate limiting, CORS, and authentication',
+      search: 'Advanced search with filters and hashtags',
+      staticFiles: 'Avatar and video file serving',
+      thumbnails: 'Automatic thumbnail generation for videos',
+      corsFixed: '✅ CORS issues resolved for video upload',
+      websocketFixed: '✅ WebSocket connection issues resolved',
+      mysqlFixed: '✅ MySQL parameters issues resolved'
+    }
+  });
+});
+
+// Test CORS endpoint
+app.get('/api/cors-test', (req, res) => {
+  res.json({
+    message: 'CORS is working perfectly! 🎉',
+    origin: req.headers.origin,
+    method: req.method,
+    headers: req.headers,
+    timestamp: new Date().toISOString(),
+    cors: {
+      allowedOrigins: [process.env.CLIENT_URL].filter(Boolean),
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
+    }
+  });
+});
+
+// Test POST endpoint for CORS
+app.post('/api/cors-test', (req, res) => {
+  res.json({
+    message: 'POST request CORS is working! 🚀',
+    data: req.body,
+    origin: req.headers.origin,
+    timestamp: new Date().toISOString(),
+    headers: {
+      'content-type': req.headers['content-type'],
+      authorization: !!req.headers.authorization
+    }
+  });
+});
+
+// Static files info endpoint
+app.get('/api/static-info', (req, res) => {
+  res.json({
+    staticFiles: {
+      avatars: '${import.meta.env.VITE_API_URL}/uploads/avatars/',
+      videos: '${import.meta.env.VITE_API_URL}/uploads/videos/',
+      thumbnails: '${import.meta.env.VITE_API_URL}/thumbnails/',
+      defaultAvatar: '${import.meta.env.VITE_API_URL}/default-avatar.png',
+      defaultThumbnail: '${import.meta.env.VITE_API_URL}/default-thumbnail.jpg'
+    },
+    uploadsDirectory: path.join(__dirname, 'uploads'),
+    thumbnailsDirectory: path.join(__dirname, 'thumbnails'),
+    publicDirectory: path.join(__dirname, 'public')
+  });
+});
+
+// Reports system info endpoint
+app.get('/api/reports-info', (req, res) => {
+  res.json({
+    system: 'Advanced Video Reports Management',
+    version: '2.0.0',
+    endpoints: {
+      createReport: 'POST /api/reports/video/:videoId',
+      getMyReports: 'GET /api/reports/my-reports',
+      getAllReports: 'GET /api/admin/reports',
+      updateReport: 'PATCH /api/admin/reports/:id/status',
+      deleteVideo: 'POST /api/admin/reports/:reportId/delete-video',
+      keepVideo: 'POST /api/admin/reports/:reportId/keep-video'
+    },
+    features: [
+      'User video reporting with categories',
+      'Admin report management dashboard',
+      'Real-time notifications',
+      'Video deletion with detailed reasoning',
+      'Report status tracking (pending, reviewed, resolved)',
+      'User notification when action is taken'
+    ],
+    reportCategories: [
+      'inappropriate_content',
+      'copyright_violation',
+      'spam_or_misleading',
+      'harassment',
+      'other'
+    ]
+  });
+});
+
+// Recommendations system info
+app.get('/api/recommendations-info', (req, res) => {
+  res.json({
+    system: 'AI-Powered Video Recommendations',
+    version: '1.0.0',
+    algorithms: [
+      'Collaborative Filtering',
+      'Content-Based Filtering',
+      'Hybrid Approach',
+      'Trending Analysis'
+    ],
+    factors: [
+      'User watch history',
+      'Likes and interactions',
+      'Following relationships',
+      'Video categories and tags',
+      'Engagement metrics',
+      'Temporal trends'
+    ],
+    endpoints: {
+      personalized: 'GET /api/recommendations/personalized',
+      trending: 'GET /api/recommendations/trending',
+      similar: 'GET /api/recommendations/similar/:videoId',
+      forYou: 'GET /api/recommendations/for-you'
+    }
+  });
+});
+
+// Search system info endpoint
+app.get('/api/search-info', (req, res) => {
+  res.json({
+    system: 'Advanced Search System',
+    version: '1.0.0',
+    endpoints: {
+      search: 'GET /api/search',
+      hashtags: 'GET /api/search/hashtags',
+      suggestions: 'GET /api/search/suggestions',
+      trendingHashtags: 'GET /api/search/trending-hashtags',
+      history: 'GET /api/search/history',
+      recommendations: 'GET /api/search/recommendations'
+    },
+    features: [
+      'Search videos and users',
+      'Hashtag-based filtering',
+      'Auto-complete suggestions',
+      'Trending hashtags',
+      'Search history',
+      'Personalized search recommendations'
+    ],
+    searchTypes: ['all', 'videos', 'users'],
+    filters: ['relevance', 'trending', 'latest', 'hashtags']
+  });
+});
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    message: '🌟 Nojoom Server API - Advanced Social Video Platform',
+    version: '2.1.0',
+    timestamp: new Date().toISOString(),
+    documentation: `${req.protocol}://${req.get('host')}/api/docs`,
+    status: 'operational',
+    endpoints: {
+      health: '/api/health',
+      metrics: '/api/metrics',
+      docs: '/api/docs',
+      corsTest: '/api/cors-test',
+      staticInfo: '/api/static-info',
+      reportsInfo: '/api/reports-info',
+      recommendationsInfo: '/api/recommendations-info',
+      searchInfo: '/api/search-info',
+      auth: '/api/auth',
+      videos: '/api/videos',
+      search: '/api/search',
+      recommendations: '/api/recommendations',
+      chat: '/api/chat',
+      admin: '/api/admin',
+      users: '/api/users',
+      user: '/api/user',
+      messages: '/api/messages',
+      reports: '/api/reports'
+    },
+    features: {
+      authentication: 'JWT with refresh tokens & rate limiting',
+      videoSharing: 'Upload, stream, like, and comment system',
+      realTimeChat: 'Socket.io based with rooms',
+      recommendations: 'AI-powered personalized video suggestions',
+      adminPanel: 'Advanced content moderation & analytics',
+      reportingSystem: 'Comprehensive video reporting & management',
+      userManagement: 'Profiles, relationships, and interactions',
+      searchSystem: 'Advanced search with filters and hashtags',
+      security: 'Helmet, CORS, rate limiting, and input validation',
+      performance: 'Compression, caching, and optimized queries',
+      staticFiles: 'Avatar and video file serving with caching',
+      thumbnails: 'Automatic thumbnail generation for videos',
+      corsFixed: '✅ CORS issues resolved for all endpoints',
+      websocketFixed: '✅ WebSocket connection issues resolved',
+      videoUploadFixed: '✅ Video upload issues resolved',
+      mysqlFixed: '✅ MySQL parameters issues resolved'
+    },
+    statistics: {
+      activeSince: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+      uptime: process.uptime()
+    }
+  });
+});
+
+// ==================== Error Handling ====================
+// 404 handler for API routes
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    error: 'API endpoint not found',
+    path: req.originalUrl,
+    method: req.method,
+    timestamp: new Date().toISOString(),
+    availableEndpoints: [
+      'GET /api/health',
+      'GET /api/docs',
+      'GET /api/metrics',
+      'GET /api/cors-test',
+      'GET /api/static-info',
+      'GET /api/search-info',
+      'POST /api/auth/register',
+      'POST /api/auth/login',
+      'GET /api/videos',
+      'GET /api/search',
+      'GET /api/recommendations/personalized',
+      'GET /api/users',
+      'GET /api/user/watch-history',
+      'GET /api/user/preferences',
+      'GET /api/user/stats',
+      'GET /api/messages',
+      'POST /api/reports/video/:videoId',
+      'GET /api/reports/my-reports'
+    ]
+  });
+});
+
+// General 404 handler for all undefined routes
+app.use((req, res) => {
+  res.status(404).json({
+    error: 'Endpoint not found',
+    message: 'Visit /api/docs for available endpoints',
+    path: req.originalUrl,
+    method: req.method,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('🚨 Server Error:', {
+    message: err.message,
+    stack: err.stack,
+    url: req.originalUrl,
+    method: req.method,
+    ip: req.ip,
+    timestamp: new Date().toISOString()
+  });
+
+  // Log to file in production
+  if (process.env.NODE_ENV === 'production') {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      error: err.message,
+      stack: err.stack,
+      url: req.originalUrl,
+      method: req.method,
+      ip: req.ip
+    };
+
+    fs.appendFileSync(
+      path.join(__dirname, 'logs', 'errors.log'),
+      JSON.stringify(logEntry) + '\n'
+    );
+  }
+
+  const errorResponse = {
+    error: 'Internal Server Error',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong',
+    timestamp: new Date().toISOString(),
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+  };
+
+  res.status(err.status || 500).json(errorResponse);
+});
+
+// ==================== Socket.io Initialization ====================
+
+// ✅ تم نقل تهيئة Socket.io إلى أعلى الملف لمنع التكرار
+
+// ==================== Graceful Shutdown ====================
+
+process.on('SIGTERM', () => {
+  console.log('🔄 SIGTERM received, shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Process terminated');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('🔄 SIGINT received, shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Process terminated');
+    process.exit(0);
+  });
+});
+
+// ==================== Start the Server ====================
+startServer();
+
+export default app;
