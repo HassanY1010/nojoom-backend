@@ -55,21 +55,21 @@ app.set('trust proxy', 1); // Required for Render / Vercel proxies
 // 2. Global Middlewares - ✅ CORS FIXED
 // ======================================================
 // Handle preflight requests for ALL routes
-app.options('/*', cors({
-  origin: process.env.CLIENT_URL,
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-}));
-
-
-// Apply CORS to all routes
 app.use(cors({
   origin: process.env.CLIENT_URL,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
+
+// Handle preflight OPTIONS requests globally
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(204); // No Content
+  } else {
+    next();
+  }
+});
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
