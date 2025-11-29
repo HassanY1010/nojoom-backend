@@ -105,6 +105,12 @@ export function getFfmpegOptions(quality) {
  */
 export function getVideoInfo(videoPath) {
     return new Promise((resolve, reject) => {
+        // ✅ التأكد من وجود الملف قبل التحليل
+        const fs = require('fs');
+        if (!fs.existsSync(videoPath)) {
+            return reject(new Error(`Video file not found: ${videoPath}`));
+        }
+
         ffmpeg.ffprobe(videoPath, (err, metadata) => {
             if (err) {
                 reject(err);
