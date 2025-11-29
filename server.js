@@ -103,12 +103,27 @@ const authLimiter = rateLimit({
 app.use(generalLimiter);
 
 // ======================================================
-// 4. Admin creation endpoint
+// 4. Special CORS for Video Upload - ✅ ADDED
+// ======================================================
+app.use('/api/videos/upload', (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', process.env.CLIENT_URL);
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
+
+// ======================================================
+// 5. Admin creation endpoint
 // ======================================================
 app.post('/create-admin', authController.createAdminIfNotExists);
 
 // ======================================================
-// 5. Routes
+// 6. Routes
 // ======================================================
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/videos', videoRoutes);
@@ -127,27 +142,12 @@ app.use('/api/challenges', challengeRoutes);
 app.use('/api/notifications', notificationRoutes);
 
 // ======================================================
-// 6. Static Files
+// 7. Static Files
 // ======================================================
 app.use('/thumbnails', express.static(path.join(__dirname, 'thumbnails')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/default-avatar.png', express.static(path.join(__dirname, 'public', 'default-avatar.png')));
 app.use('/default-thumbnail.jpg', express.static(path.join(__dirname, 'public', 'default-thumbnail.jpg')));
-
-// ======================================================
-// 7. Manual CORS Headers for Video Upload - ✅ ADDED
-// ======================================================
-app.use('/api/videos/upload', (req, res, next) => {
-  res.header('Access-Control-Allow-Origin', process.env.CLIENT_URL);
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  next();
-});
 
 // ======================================================
 // 8. Start Server + Database + Socket.IO
