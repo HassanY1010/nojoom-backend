@@ -106,6 +106,7 @@ export const videoController = {
       }
 
       const targetUserId = parseInt(userId);
+      // ✅ استخدام قيم افتراضية آمنة
       const reqUserId = parseInt(req.user?.id) || 0;
 
       let orderBy = 'v.created_at DESC';
@@ -322,12 +323,16 @@ export const videoController = {
 
   async getVideos(req, res) {
     try {
+      // ✅ استخدام قيم افتراضية آمنة
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 10;
       const offset = (page - 1) * limit;
+      const userId = req.user?.id || 0;
+
+      console.log('🔍 Fetching videos with params:', { page, limit, offset, userId });
 
       // 🟣 1. جلب الفيديوهات الأساسية
-      const videos = await Video.getVideos(limit, offset);
+      const videos = await Video.getVideos(limit, offset, userId);
 
       // 🔵 2. دومين السيرفر لصناعة روابط كاملة
       const BASE_URL = process.env.SERVER_URL || "https://nojoom-backend.onrender.com";
@@ -347,7 +352,7 @@ export const videoController = {
         // 🔹 B. عدد اللايكات
         const [likeCount] = await pool.execute(
           `SELECT COUNT(*) AS count 
-           FROM video_likes 
+           FROM likes 
            WHERE video_id = ?`,
           [videoId]
         );
@@ -394,6 +399,7 @@ export const videoController = {
   async getRecommendedVideos(req, res) {
     try {
       const userId = req.user.id;
+      // ✅ استخدام قيم افتراضية آمنة
       const limit = parseInt(req.query.limit) || 10;
 
       console.log(`🔄 Getting recommended videos for user: ${userId}`);
@@ -480,6 +486,7 @@ export const videoController = {
   async getFollowingVideos(req, res) {
     try {
       const userId = req.user.id;
+      // ✅ استخدام قيم افتراضية آمنة
       const limit = parseInt(req.query.limit) || 10;
 
       console.log(`🔄 Getting following videos for user: ${userId}`);
@@ -534,6 +541,7 @@ export const videoController = {
   async getVideo(req, res) {
     try {
       const { id } = req.params;
+      // ✅ استخدام قيم افتراضية آمنة
       const userId = req.user?.id || 0;
 
       console.log('🔍 Fetching video:', id);
@@ -845,7 +853,8 @@ export const videoController = {
   async searchVideos(req, res) {
     try {
       const { q } = req.query;
-      const userId = req.user?.id;
+      // ✅ استخدام قيم افتراضية آمنة
+      const userId = req.user?.id || 0;
       const limit = parseInt(req.query.limit) || 20;
 
       if (!q || q.trim().length < 2) {
@@ -877,6 +886,7 @@ export const videoController = {
 
   async getTrendingVideos(req, res) {
     try {
+      // ✅ استخدام قيم افتراضية آمنة
       const limit = parseInt(req.query.limit) || 10;
       const days = parseInt(req.query.days) || 7;
 
@@ -1089,6 +1099,7 @@ export const videoController = {
   async getIncompleteVideos(req, res) {
     try {
       const userId = req.user.id;
+      // ✅ استخدام قيم افتراضية آمنة
       const limit = parseInt(req.query.limit) || 10;
 
       const { videoProgressService } = await import('../services/videoProgressService.js');
