@@ -120,39 +120,41 @@ export class Video {
   }
 
   static async getVideos(limit = 10, offset = 0, userId = 0) {
-    try {
-      // ✅ استخدام قيم افتراضية آمنة
-      const safeUserId = parseInt(userId) || 0;
-      const safeLimit = parseInt(limit) || 10;
-      const safeOffset = parseInt(offset) || 0;
+  try {
+    // ✅ استخدام قيم افتراضية آمنة
+    const safeUserId = parseInt(userId) || 0;
+    const safeLimit = parseInt(limit) || 10;
+    const safeOffset = parseInt(offset) || 0;
 
-      console.log('🔍 Executing getVideos query with params:', {
-        userId: safeUserId,
-        limit: safeLimit,
-        offset: safeOffset
-      });
+    console.log('🔍 Executing getVideos query with params:', {
+      userId: safeUserId,
+      limit: safeLimit,
+      offset: safeOffset
+    });
 
-      const [rows] = await pool.execute(
-        `SELECT v.*, u.username, u.avatar,
-                COUNT(DISTINCT l.user_id) as likes,
-                EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-         FROM videos v 
-         JOIN users u ON v.user_id = u.id 
-         LEFT JOIN likes l ON v.id = l.video_id
-         WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
-         GROUP BY v.id
-         ORDER BY v.created_at DESC 
-         LIMIT ? OFFSET ?`,
-        [safeUserId, safeLimit, safeOffset]
-      );
+    // MySQL لا يقبل placeholders مباشرة للـ LIMIT/OFFSET في بعض الحالات
+    const query = `
+      SELECT v.*, u.username, u.avatar,
+             COUNT(DISTINCT l.user_id) as likes,
+             EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+      FROM videos v
+      JOIN users u ON v.user_id = u.id
+      LEFT JOIN likes l ON v.id = l.video_id
+      WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
+      GROUP BY v.id
+      ORDER BY v.created_at DESC
+      LIMIT ${safeLimit} OFFSET ${safeOffset}
+    `;
 
-      console.log(`✅ Found ${rows.length} videos`);
-      return rows;
-    } catch (error) {
-      console.error('❌ Error in Video.getVideos:', error);
-      return [];
-    }
+    const [rows] = await pool.execute(query, [safeUserId]);
+
+    console.log(`✅ Found ${rows.length} videos`);
+    return rows;
+  } catch (error) {
+    console.error('❌ Error in Video.getVideos:', error);
+    return [];
   }
+}
 
   // ============ نظام التوصية المتقدم ============
   static async getVideosFromFollowingUsers(userId, limit = 10) {
@@ -184,59 +186,66 @@ export class Video {
     }
   }
 
-  static async getVideosByPreferences(userId, preferences, limit = 10) {
-    try {
-      const { preferred_categories = [], excluded_users = [] } = preferences;
-      
-      // ✅ استخدام قيم افتراضية آمنة
-      const safeUserId = userId || 0;
-      const safeLimit = parseInt(limit) || 10;
+static async getVideosByPreferences(userId, preferences, limit = 10) {
+  try {
+    const { preferred_categories = [], excluded_users = [] } = preferences;
 
-      let query = `
-        SELECT v.*, u.username, u.avatar,
-               COUNT(DISTINCT l.user_id) as likes,
-               EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked,
-               (SELECT COUNT(*) FROM watch_history WHERE user_id = ? AND video_id = v.id) as watch_count
-        FROM videos v
-        JOIN users u ON v.user_id = u.id
-        LEFT JOIN likes l ON v.id = l.video_id
-        WHERE v.deleted_by_admin = FALSE 
-          AND u.is_banned = FALSE
-      `;
-      
-      const params = [safeUserId, safeUserId];
-      
-      if (excluded_users.length > 0) {
-        query += ' AND v.user_id NOT IN (?)';
-        params.push(excluded_users);
-      } else {
-        query += ' AND v.user_id NOT IN (0)';
-      }
-      
-      if (preferred_categories.length > 0) {
-        query += ' AND (v.description LIKE ? OR u.username IN (?))';
-        const searchTerm = `%${preferred_categories[0]}%`;
-        params.push(searchTerm, preferred_categories);
-      }
-      
-      query += `
-        GROUP BY v.id
-        ORDER BY 
-          (SELECT COALESCE(SUM(weight), 0) FROM user_interactions WHERE user_id = ? AND video_id = v.id) DESC,
-          v.views DESC,
-          v.created_at DESC
-        LIMIT ?
-      `;
-      
-      params.push(safeUserId, safeLimit);
-      
-      const [rows] = await pool.execute(query, params);
-      return rows;
-    } catch (error) {
-      console.error('Error in Video.getVideosByPreferences:', error);
-      return [];
+    // ✅ استخدام قيم افتراضية آمنة
+    const safeUserId = parseInt(userId) || 0;
+    const safeLimit = parseInt(limit) || 10;
+
+    let query = `
+      SELECT v.*, u.username, u.avatar,
+             COUNT(DISTINCT l.user_id) as likes,
+             EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked,
+             (SELECT COUNT(*) FROM watch_history WHERE user_id = ? AND video_id = v.id) as watch_count
+      FROM videos v
+      JOIN users u ON v.user_id = u.id
+      LEFT JOIN likes l ON v.id = l.video_id
+      WHERE v.deleted_by_admin = FALSE 
+        AND u.is_banned = FALSE
+    `;
+
+    const params = [safeUserId, safeUserId];
+
+    // ✅ معالجة excluded_users بشكل صحيح
+    if (excluded_users.length > 0) {
+      query += ` AND v.user_id NOT IN (${excluded_users.map(() => '?').join(',')})`;
+      params.push(...excluded_users);
     }
+
+    // ✅ معالجة preferred_categories بشكل صحيح
+    if (preferred_categories.length > 0) {
+      query += ' AND (';
+      preferred_categories.forEach((cat, index) => {
+        if (index > 0) query += ' OR ';
+        query += 'v.description LIKE ?';
+        params.push(`%${cat}%`);
+      });
+      query += ')';
+    }
+
+    query += `
+      GROUP BY v.id
+      ORDER BY 
+        (SELECT COALESCE(SUM(weight), 0) FROM user_interactions WHERE user_id = ? AND video_id = v.id) DESC,
+        v.views DESC,
+        v.created_at DESC
+      LIMIT ?
+    `;
+
+    params.push(safeUserId, safeLimit);
+
+    console.log('Executing getVideosByPreferences with params:', params);
+
+    const [rows] = await pool.execute(query, params);
+    return rows;
+  } catch (error) {
+    console.error('Error in Video.getVideosByPreferences:', error);
+    return [];
   }
+}
+
 
   static async getSimilarVideos(videoId, userId = null, limit = 10) {
     try {
