@@ -74,23 +74,43 @@ export const initializeDatabase = async () => {
     `);
 
     // ✅ تحديث جدول المستخدمين لإضافة أعمدة الإعدادات الجديدة
-    await connection.execute(`
-      ALTER TABLE users 
-      ADD COLUMN IF NOT EXISTS is_private BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS allow_dms BOOLEAN DEFAULT TRUE,
-      ADD COLUMN IF NOT EXISTS show_activity_status BOOLEAN DEFAULT TRUE
-    `).catch(() => {
-      console.log('⚠️ Settings columns already exist in users table');
-    });
+    // إضافة أعمدة الإعدادات الجديدة (بدون IF NOT EXISTS)
+await connection.execute(`
+  ALTER TABLE users 
+  ADD COLUMN is_private BOOLEAN DEFAULT FALSE
+`).catch(() => {
+  console.log("⚠️ Column is_private already exists");
+});
 
-    // ✅ إضافة أعمدة OTP لجدول المستخدمين
+await connection.execute(`
+  ALTER TABLE users 
+  ADD COLUMN allow_dms BOOLEAN DEFAULT TRUE
+`).catch(() => {
+  console.log("⚠️ Column allow_dms already exists");
+});
+
+await connection.execute(`
+  ALTER TABLE users 
+  ADD COLUMN show_activity_status BOOLEAN DEFAULT TRUE
+`).catch(() => {
+  console.log("⚠️ Column show_activity_status already exists");
+});
+
+
     await connection.execute(`
-      ALTER TABLE users 
-      ADD COLUMN IF NOT EXISTS otp_code VARCHAR(6),
-      ADD COLUMN IF NOT EXISTS otp_expires TIMESTAMP NULL
-    `).catch(() => {
-      console.log('⚠️ OTP columns already exist in users table');
-    });
+  ALTER TABLE users 
+  ADD COLUMN otp_code VARCHAR(6)
+`).catch(() => {
+  console.log("⚠️ Column otp_code already exists");
+});
+
+await connection.execute(`
+  ALTER TABLE users 
+  ADD COLUMN otp_expires TIMESTAMP NULL
+`).catch(() => {
+  console.log("⚠️ Column otp_expires already exists");
+});
+
 
     // ✅ إنشاء جدول reset_codes لإعادة تعيين كلمة المرور
     await connection.execute(`
@@ -520,15 +540,13 @@ export const initializeDatabase = async () => {
       )
     `);
 
-    // ✅ تحديث جدول watch_history لإضافة last_position
     await connection.execute(`
-      ALTER TABLE watch_history 
-      ADD COLUMN IF NOT EXISTS last_position DECIMAL(10,2) DEFAULT 0 
-      COMMENT 'آخر ثانية تمت مشاهدتها للاستئناف'
-    `).catch(() => {
-      // العمود موجود بالفعل، تجاهل الخطأ
-      console.log('⚠️ Column last_position already exists in watch_history');
-    });
+  ALTER TABLE watch_history 
+  ADD COLUMN last_position DECIMAL(10,2) DEFAULT 0
+`).catch(() => {
+  console.log("⚠️ Column last_position already exists in watch_history");
+});
+
 
     // ✅ جدول التحديات الأسبوعية (Weekly Challenges)
     await connection.execute(`
@@ -609,20 +627,18 @@ export const initializeDatabase = async () => {
 
     // ✅ إضافة عمود shares للفيديوهات إذا لم يكن موجوداً
     await connection.execute(`
-      ALTER TABLE videos 
-      ADD COLUMN IF NOT EXISTS shares INT DEFAULT 0
-    `).catch(() => {
-      console.log('⚠️ Column shares already exists in videos');
-    });
+  ALTER TABLE videos 
+  ADD COLUMN shares INT DEFAULT 0
+`).catch(() => {
+  console.log("⚠️ Column shares already exists in videos");
+});
 
-    // ✅ إضافة عمود thumbnail للفيديوهات إذا لم يكن موجوداً
-    await connection.execute(`
-      ALTER TABLE videos 
-      ADD COLUMN IF NOT EXISTS thumbnail VARCHAR(255)
-    `).catch(() => {
-      console.log('⚠️ Column thumbnail already exists in videos');
-    });
-
+await connection.execute(`
+  ALTER TABLE videos 
+  ADD COLUMN thumbnail VARCHAR(255)
+`).catch(() => {
+  console.log("⚠️ Column thumbnail already exists in videos");
+});
     // ✅ جدول مشاركات الفيديو (Video Shares)
     await connection.execute(`
       CREATE TABLE IF NOT EXISTS video_shares (
