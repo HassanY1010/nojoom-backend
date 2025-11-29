@@ -35,6 +35,9 @@ export class Video {
           orderBy = 'v.created_at DESC';
       }
 
+      // ✅ استخدام قيم افتراضية آمنة
+      const safeUserId = userId || 0;
+
       const [rows] = await pool.execute(
         `SELECT v.*, u.username, u.avatar,
                 COUNT(DISTINCT l.user_id) as likes,
@@ -45,7 +48,7 @@ export class Video {
          WHERE v.user_id = ? AND v.deleted_by_admin = FALSE
          GROUP BY v.id
          ORDER BY ${orderBy}`,
-        [0, userId]
+        [safeUserId, safeUserId]
       );
 
       return rows;
@@ -116,32 +119,48 @@ export class Video {
     return rows[0];
   }
 
-  static async getVideos(userId = 0, limit = 10, offset = 0) {
-    // تأكد أن القيم أرقام صحيحة
-    const userIdInt = parseInt(userId) || 0;
-    const limitInt = parseInt(limit) || 10;
-    const offsetInt = parseInt(offset) || 0;
+  static async getVideos(limit = 10, offset = 0, userId = 0) {
+    try {
+      // ✅ استخدام قيم افتراضية آمنة
+      const safeUserId = parseInt(userId) || 0;
+      const safeLimit = parseInt(limit) || 10;
+      const safeOffset = parseInt(offset) || 0;
 
-    const [rows] = await pool.execute(
-      `SELECT v.*, u.username, u.avatar,
-              COUNT(DISTINCT l.user_id) as likes,
-              EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-       FROM videos v 
-       JOIN users u ON v.user_id = u.id 
-       LEFT JOIN likes l ON v.id = l.video_id
-       WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
-       GROUP BY v.id
-       ORDER BY v.created_at DESC 
-       LIMIT ? OFFSET ?`,
-      [userIdInt, limitInt, offsetInt]
-    );
+      console.log('🔍 Executing getVideos query with params:', {
+        userId: safeUserId,
+        limit: safeLimit,
+        offset: safeOffset
+      });
 
-    return rows;
+      const [rows] = await pool.execute(
+        `SELECT v.*, u.username, u.avatar,
+                COUNT(DISTINCT l.user_id) as likes,
+                EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+         FROM videos v 
+         JOIN users u ON v.user_id = u.id 
+         LEFT JOIN likes l ON v.id = l.video_id
+         WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
+         GROUP BY v.id
+         ORDER BY v.created_at DESC 
+         LIMIT ? OFFSET ?`,
+        [safeUserId, safeLimit, safeOffset]
+      );
+
+      console.log(`✅ Found ${rows.length} videos`);
+      return rows;
+    } catch (error) {
+      console.error('❌ Error in Video.getVideos:', error);
+      return [];
+    }
   }
 
   // ============ نظام التوصية المتقدم ============
   static async getVideosFromFollowingUsers(userId, limit = 10) {
     try {
+      // ✅ استخدام قيم افتراضية آمنة
+      const safeUserId = userId || 0;
+      const safeLimit = parseInt(limit) || 10;
+
       const [rows] = await pool.execute(
         `SELECT v.*, u.username, u.avatar,
                 COUNT(DISTINCT l.user_id) as likes,
@@ -156,7 +175,7 @@ export class Video {
          GROUP BY v.id
          ORDER BY v.created_at DESC
          LIMIT ?`,
-        [userId, userId, limit]
+        [safeUserId, safeUserId, safeLimit]
       );
       return rows;
     } catch (error) {
@@ -169,6 +188,10 @@ export class Video {
     try {
       const { preferred_categories = [], excluded_users = [] } = preferences;
       
+      // ✅ استخدام قيم افتراضية آمنة
+      const safeUserId = userId || 0;
+      const safeLimit = parseInt(limit) || 10;
+
       let query = `
         SELECT v.*, u.username, u.avatar,
                COUNT(DISTINCT l.user_id) as likes,
@@ -181,7 +204,7 @@ export class Video {
           AND u.is_banned = FALSE
       `;
       
-      const params = [userId, userId];
+      const params = [safeUserId, safeUserId];
       
       if (excluded_users.length > 0) {
         query += ' AND v.user_id NOT IN (?)';
@@ -205,7 +228,7 @@ export class Video {
         LIMIT ?
       `;
       
-      params.push(userId, limit);
+      params.push(safeUserId, safeLimit);
       
       const [rows] = await pool.execute(query, params);
       return rows;
@@ -222,6 +245,10 @@ export class Video {
 
       const firstWord = currentVideo.description?.split(' ')[0] || '';
       
+      // ✅ استخدام قيم افتراضية آمنة
+      const safeUserId = userId || 0;
+      const safeLimit = parseInt(limit) || 10;
+
       const [rows] = await pool.execute(
         `SELECT v.*, u.username, u.avatar,
                 COUNT(DISTINCT l.user_id) as likes,
@@ -241,12 +268,12 @@ export class Video {
          ORDER BY similarity_score DESC, v.views DESC
          LIMIT ?`,
         [
-          userId || 0, 
+          safeUserId, 
           firstWord,
           videoId, 
           firstWord,
           currentVideo.user_id, 
-          limit
+          safeLimit
         ]
       );
       
@@ -402,6 +429,10 @@ export class Video {
   }
 
   static async getVideosByUser(userId, limit = 10, offset = 0) {
+    // ✅ استخدام قيم افتراضية آمنة
+    const safeLimit = parseInt(limit) || 10;
+    const safeOffset = parseInt(offset) || 0;
+
     const [rows] = await pool.execute(
       `SELECT v.*, u.username, u.avatar 
        FROM videos v 
@@ -409,7 +440,7 @@ export class Video {
        WHERE v.user_id = ? AND v.deleted_by_admin = FALSE 
        ORDER BY v.created_at DESC 
        LIMIT ? OFFSET ?`,
-      [userId, limit, offset]
+      [userId, safeLimit, safeOffset]
     );
     return rows;
   }
@@ -482,6 +513,9 @@ export class Video {
   }
 
   static async getVideoWithLikes(id, userId = null) {
+    // ✅ استخدام قيم افتراضية آمنة
+    const safeUserId = userId || 0;
+
     const [rows] = await pool.execute(
       `SELECT v.*, u.username, u.avatar, 
               COUNT(DISTINCT l.user_id) as likes,
@@ -491,7 +525,7 @@ export class Video {
        LEFT JOIN likes l ON v.id = l.video_id
        WHERE v.id = ? AND v.deleted_by_admin = FALSE AND u.is_banned = FALSE
        GROUP BY v.id`,
-      [userId || 0, id]
+      [safeUserId, id]
     );
     return rows[0];
   }
@@ -561,6 +595,9 @@ export class Video {
 
   // ============ الفيديوهات الشائعة ============
   static async getMostViewedVideos(limit = 10) {
+    // ✅ استخدام قيم افتراضية آمنة
+    const safeLimit = parseInt(limit) || 10;
+
     const [rows] = await pool.execute(
       `SELECT v.*, u.username, u.avatar 
        FROM videos v 
@@ -568,12 +605,16 @@ export class Video {
        WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
        ORDER BY COALESCE(v.views, 0) DESC 
        LIMIT ?`,
-      [limit]
+      [safeLimit]
     );
     return rows;
   }
 
   static async getTrendingVideos(limit = 10, days = 7) {
+    // ✅ استخدام قيم افتراضية آمنة
+    const safeLimit = parseInt(limit) || 10;
+    const safeDays = parseInt(days) || 7;
+
     const [rows] = await pool.execute(
       `SELECT v.*, u.username, u.avatar,
               COUNT(DISTINCT l.user_id) as likes,
@@ -587,7 +628,7 @@ export class Video {
        GROUP BY v.id
        ORDER BY engagement_rate DESC, likes DESC
        LIMIT ?`,
-      [days, limit]
+      [safeDays, safeLimit]
     );
     return rows;
   }
@@ -605,7 +646,9 @@ export class Video {
   static removeDuplicateVideos(videos) {
     const seen = new Set();
     return videos.filter(video => {
-      if (seen.has(video.id)) return false;
+      if (seen.has(video.id)) {
+        return false;
+      }
       seen.add(video.id);
       return true;
     });
@@ -650,6 +693,10 @@ export class Video {
 
   static async searchVideos(query, userId = null, limit = 20) {
     try {
+      // ✅ استخدام قيم افتراضية آمنة
+      const safeUserId = userId || 0;
+      const safeLimit = parseInt(limit) || 20;
+
       const [rows] = await pool.execute(
         `SELECT v.*, u.username, u.avatar,
                 COUNT(DISTINCT l.user_id) as likes,
@@ -670,12 +717,12 @@ export class Video {
            COALESCE(v.views, 0) DESC
          LIMIT ?`,
         [
-          userId || 0,
+          safeUserId,
           `%${query}%`,
           `%${query}%`,
           `%${query}%`,
           `%${query}%`,
-          limit
+          safeLimit
         ]
       );
       return rows;
@@ -688,6 +735,9 @@ export class Video {
   // ============ دوال جديدة لنظام التوصية ============
   static async getUserWatchHistory(userId, limit = 50) {
     try {
+      // ✅ استخدام قيم افتراضية آمنة
+      const safeLimit = parseInt(limit) || 50;
+
       const [rows] = await pool.execute(
         `SELECT wh.*, v.*, u.username as video_username 
          FROM watch_history wh
@@ -696,7 +746,7 @@ export class Video {
          WHERE wh.user_id = ? AND v.deleted_by_admin = FALSE
          ORDER BY wh.updated_at DESC
          LIMIT ?`,
-        [userId, limit]
+        [userId, safeLimit]
       );
       return rows;
     } catch (error) {
@@ -707,6 +757,9 @@ export class Video {
 
   static async getPopularVideosByCategory(category, limit = 10) {
     try {
+      // ✅ استخدام قيم افتراضية آمنة
+      const safeLimit = parseInt(limit) || 10;
+
       const [rows] = await pool.execute(
         `SELECT v.*, u.username, u.avatar,
                 COUNT(DISTINCT l.user_id) as likes,
@@ -720,7 +773,7 @@ export class Video {
          GROUP BY v.id
          ORDER BY COALESCE(v.views, 0) DESC
          LIMIT ?`,
-        [0, `%${category}%`, limit]
+        [0, `%${category}%`, safeLimit]
       );
       return rows;
     } catch (error) {
@@ -731,6 +784,9 @@ export class Video {
 
   static async getRecentlyInteractedVideos(userId, limit = 10) {
     try {
+      // ✅ استخدام قيم افتراضية آمنة
+      const safeLimit = parseInt(limit) || 10;
+
       const [rows] = await pool.execute(
         `SELECT v.*, u.username, u.avatar,
                 COUNT(DISTINCT l.user_id) as likes,
@@ -746,7 +802,7 @@ export class Video {
          GROUP BY v.id
          ORDER BY last_interaction DESC
          LIMIT ?`,
-        [userId, userId, limit]
+        [userId, userId, safeLimit]
       );
       return rows;
     } catch (error) {
@@ -784,6 +840,9 @@ export class Video {
 
   static async getTopCreatorsByEngagement(limit = 10) {
     try {
+      // ✅ استخدام قيم افتراضية آمنة
+      const safeLimit = parseInt(limit) || 10;
+
       const [rows] = await pool.execute(
         `SELECT u.id, u.username, u.avatar,
                 COUNT(DISTINCT v.id) as video_count,
@@ -798,7 +857,7 @@ export class Video {
          GROUP BY u.id
          ORDER BY engagement_score DESC
          LIMIT ?`,
-        [limit]
+        [safeLimit]
       );
       return rows;
     } catch (error) {
