@@ -188,9 +188,17 @@ export class Video {
 
 static async getVideosByPreferences(userId, preferences, limit = 10) {
   try {
-    const { preferred_categories = [], excluded_users = [] } = preferences;
+    let { preferred_categories = [], excluded_users = [] } = preferences;
 
-    // ✅ استخدام قيم افتراضية آمنة
+    // 🔥 تنظيف المصفوفات لمنع الأخطاء
+    const cleanExcludedUsers = (Array.isArray(excluded_users) ? excluded_users : [])
+      .filter(id => id !== null && id !== undefined && !isNaN(id))
+      .map(id => parseInt(id));
+
+    const cleanPreferredCategories = (Array.isArray(preferred_categories) ? preferred_categories : [])
+      .filter(cat => typeof cat === 'string' && cat.trim() !== '');
+
+    // قيم آمنة
     const safeUserId = parseInt(userId) || 0;
     const safeLimit = parseInt(limit) || 10;
 
@@ -208,16 +216,16 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
 
     const params = [safeUserId, safeUserId];
 
-    // ✅ معالجة excluded_users بشكل صحيح
-    if (excluded_users.length > 0) {
-      query += ` AND v.user_id NOT IN (${excluded_users.map(() => '?').join(',')})`;
-      params.push(...excluded_users);
+    // 🔥 معالجة excluded_users الآمنة
+    if (cleanExcludedUsers.length > 0) {
+      query += ` AND v.user_id NOT IN (${cleanExcludedUsers.map(() => '?').join(',')})`;
+      params.push(...cleanExcludedUsers);
     }
 
-    // ✅ معالجة preferred_categories بشكل صحيح
-    if (preferred_categories.length > 0) {
+    // 🔥 معالجة preferred_categories الآمنة
+    if (cleanPreferredCategories.length > 0) {
       query += ' AND (';
-      preferred_categories.forEach((cat, index) => {
+      cleanPreferredCategories.forEach((cat, index) => {
         if (index > 0) query += ' OR ';
         query += 'v.description LIKE ?';
         params.push(`%${cat}%`);
@@ -240,6 +248,7 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
 
     const [rows] = await pool.execute(query, params);
     return rows;
+
   } catch (error) {
     console.error('Error in Video.getVideosByPreferences:', error);
     return [];
