@@ -49,17 +49,23 @@ const __dirname = path.dirname(__filename);
 // 1. Initialize Express
 // ======================================================
 const app = express();
-
-// Required for Render / Vercel proxies
-app.set('trust proxy', 1);
+app.set('trust proxy', 1); // Required for Render / Vercel proxies
 
 // ======================================================
 // 2. Global Middlewares
 // ======================================================
+app.options('*', cors({
+  origin: process.env.CLIENT_URL,
+  credentials: true,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization']
+}));
+
 app.use(cors({
   origin: process.env.CLIENT_URL,
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization']
 }));
 
 app.use(helmet({
@@ -69,21 +75,21 @@ app.use(helmet({
 
 app.use(compression());
 app.use(morgan('dev'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// Create admin auto (once)
-app.post('/create-admin', authController.createAdminIfNotExists);
+// Body parser with higher limit for video upload
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
-// General rate limiting
-app.use(rateLimit({
+// ======================================================
+// 3. Rate Limiting
+// ======================================================
+const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 1000,
   standardHeaders: true,
   legacyHeaders: false
-}));
+});
 
-// Authentication limiter
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -91,8 +97,15 @@ const authLimiter = rateLimit({
   legacyHeaders: false
 });
 
+app.use(generalLimiter);
+
 // ======================================================
-// 3. Routes
+// 4. Admin creation endpoint
+// ======================================================
+app.post('/create-admin', authController.createAdminIfNotExists);
+
+// ======================================================
+// 5. Routes
 // ======================================================
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/videos', videoRoutes);
@@ -111,7 +124,7 @@ app.use('/api/challenges', challengeRoutes);
 app.use('/api/notifications', notificationRoutes);
 
 // ======================================================
-// 4. Static Files
+// 6. Static Files
 // ======================================================
 app.use('/thumbnails', express.static(path.join(__dirname, 'thumbnails')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -119,7 +132,7 @@ app.use('/default-avatar.png', express.static(path.join(__dirname, 'public', 'de
 app.use('/default-thumbnail.jpg', express.static(path.join(__dirname, 'public', 'default-thumbnail.jpg')));
 
 // ======================================================
-// 5. Start Server + Database + Socket.IO
+// 7. Start Server + Database + Socket.IO
 // ======================================================
 const server = createServer(app);
 
@@ -129,25 +142,12 @@ const startServer = async () => {
     await initializeDatabase();
     console.log('✅ Database initialized successfully');
 
-    // Ensure required directories exist
-    const directories = [
-      'uploads',
-      'uploads/videos',
-      'uploads/avatars',
-      'thumbnails',
-      'temp',
-      'logs',
-      'public'
-    ];
-
+    // Ensure directories exist
+    const directories = ['uploads', 'uploads/videos', 'uploads/avatars', 'thumbnails', 'temp', 'logs', 'public'];
     for (const dir of directories) {
       const dirPath = path.join(__dirname, dir);
-      try {
-        await fs.promises.access(dirPath);
-      } catch {
-        await fs.promises.mkdir(dirPath, { recursive: true });
-        console.log(`📁 Created: ${dir}`);
-      }
+      try { await fs.promises.access(dirPath); } 
+      catch { await fs.promises.mkdir(dirPath, { recursive: true }); console.log(`📁 Created: ${dir}`); }
     }
 
     const PORT = process.env.PORT || 5000;
@@ -170,6 +170,10 @@ const startServer = async () => {
     process.exit(1);
   }
 };
+
+// Graceful shutdown
+process.on('SIGTERM', () => { server.close(() => process.exit(0)); });
+process.on('SIGINT', () => { server.close(() => process.exit(0)); });
 
 startServer();
 
