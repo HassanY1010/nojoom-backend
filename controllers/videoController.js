@@ -6,8 +6,6 @@ import { ThumbnailService } from '../services/thumbnailService.js';
 import { createClient } from '@supabase/supabase-js';
 import { fileURLToPath } from 'url';
 
-// ✅ استيراد Supabase
-import { createClient } from '@supabase/supabase-js';
 
 import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
