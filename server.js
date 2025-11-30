@@ -247,212 +247,103 @@ app.get('/api/debug/tables', async (req, res) => {
 // ==================== User Routes ====================
 
 // ✅ إصلاح route سجل المشاهدة مباشرة لحل مشكلة العمود title
+// GET /api/user/watch-history
 app.get('/api/user/watch-history', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    // ✅ استخدام قيم افتراضية آمنة
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const page   = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit  = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
 
-    console.log('🔄 Fetching watch history for user:', userId);
+    const sql = `
+      SELECT 
+        wh.*, v.id as video_id, v.url, u.username as owner_username
+      FROM watch_history wh
+      JOIN videos v ON wh.video_id = v.id
+      JOIN users u ON v.user_id = u.id
+      WHERE wh.user_id = ?
+      ORDER BY wh.updated_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
 
-    // أولاً: التحقق من هيكل جدول videos
-    try {
-      const [columns] = await pool.execute(`
-        SELECT COLUMN_NAME 
-        FROM INFORMATION_SCHEMA.COLUMNS 
-        WHERE TABLE_SCHEMA = DATABASE() 
-        AND TABLE_NAME = 'videos'
-      `);
+    const [history] = await pool.execute(sql, [userId]);
 
-      const videoColumns = columns.map(col => col.COLUMN_NAME);
-      console.log('📊 Available video columns:', videoColumns);
+    const [totalRows] = await pool.execute(
+      'SELECT COUNT(*) as total FROM watch_history WHERE user_id = ?',
+      [userId]
+    );
 
-      // بناء الاستعلام ديناميكياً بناءً على الأعمدة المتاحة
-      let titleColumn = 'title';
-      let descriptionColumn = 'description';
-
-      // التحقق من وجود الأعمدة
-      if (!videoColumns.includes('title')) {
-        console.log('⚠️ Column "title" not found, using "video_title" instead');
-        titleColumn = 'video_title';
+    res.json({
+      success: true,
+      data: history,
+      pagination: {
+        page,
+        limit,
+        total: totalRows[0].total,
+        pages: Math.ceil(totalRows[0].total / limit)
       }
-
-      if (!videoColumns.includes('description')) {
-        console.log('⚠️ Column "description" not found, using "video_description" instead');
-        descriptionColumn = 'video_description';
-      }
-
-   const [history] = await pool.execute(
-  `SELECT 
-     wh.*, v.id as video_id, v.url, u.username as owner_username
-   FROM watch_history wh
-   JOIN videos v ON wh.video_id = v.id
-   JOIN users u ON v.user_id = u.id
-   WHERE wh.user_id = ?
-   ORDER BY wh.updated_at DESC
-   LIMIT ? OFFSET ?`,
-  [userId, parseInt(limit), parseInt(offset)]   // 3 عناصر = 3 ?
-);
-
-      const [totalCount] = await pool.execute(
-        'SELECT COUNT(*) as total FROM watch_history WHERE user_id = ?',
-        [userId]
-      );
-
-      res.json({
-        success: true,
-        data: history,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total: totalCount[0].total,
-          pages: Math.ceil(totalCount[0].total / limit)
-        }
-      });
-
-    } catch (dbError) {
-      console.error('❌ Database structure error:', dbError);
-
-      // استعلام بديل إذا فشل الأول
-      const [simpleHistory] = await pool.execute(
-        `SELECT 
-          wh.*,
-          v.id as video_id,
-          v.url,
-          u.username as owner_username
-         FROM watch_history wh
-         JOIN videos v ON wh.video_id = v.id
-         JOIN users u ON v.user_id = u.id
-         WHERE wh.user_id = ?
-         ORDER BY wh.updated_at DESC
-         LIMIT ? OFFSET ?`,
-        [userId, limit, offset]
-      );
-
-      res.json({
-        success: true,
-        data: simpleHistory,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total: simpleHistory.length,
-          pages: 1
-        }
-      });
-    }
+    });
   } catch (error) {
     console.error('❌ Get watch history error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get watch history',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Failed to get watch history'
     });
   }
 });
 
-// ✅ إضافة route لتسجيل مشاهدة الفيديو - تم التصحيح
+// POST /api/user/watch-history
 app.post('/api/user/watch-history', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId   = req.user.id;
     const { videoId, watchTime = 1, completed = false } = req.body;
 
-    console.log('🔄 Recording watch history:', { userId, videoId, watchTime });
-
-    // التحقق من وجود الفيديو
-    const [videos] = await pool.execute(
-      'SELECT id FROM videos WHERE id = ?',
-      [videoId]
-    );
-
-    if (videos.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Video not found'
-      });
-    }
-
-    // ✅ التصحيح: استخدام ON DUPLICATE KEY UPDATE بدلاً من INSERT مباشرة
     await pool.execute(
-      `INSERT INTO watch_history (user_id, video_id, watch_time, completed) 
-       VALUES (?, ?, ?, ?) 
+      `INSERT INTO watch_history (user_id, video_id, watch_time, completed)
+       VALUES (?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE 
-       watch_time = VALUES(watch_time), 
-       completed = VALUES(completed),
+       watch_time = VALUES(watch_time),
+       completed  = VALUES(completed),
        updated_at = CURRENT_TIMESTAMP`,
       [userId, videoId, watchTime, completed]
     );
 
-    // زيادة عدد مشاهدات الفيديو
     await pool.execute(
-      'UPDATE videos SET views = COALESCE(views, 0) + 1 WHERE id = ?',
+      'UPDATE videos SET views = COALESCE(views,0)+1 WHERE id = ?',
       [videoId]
     );
 
-    res.json({
-      success: true,
-      message: 'Watch history updated successfully'
-    });
+    res.json({ success: true, message: 'Watch history updated' });
   } catch (error) {
     console.error('❌ Update watch history error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update watch history'
-    });
+    res.status(500).json({ success: false, message: 'Failed to update watch history' });
   }
 });
 
-// ✅ إضافة route تفضيلات المستخدم مباشرة
+// GET /api/user/preferences
 app.get('/api/user/preferences', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    console.log('🔄 Getting user preferences for:', userId);
 
-    // محاولة جلب التفضيلات من قاعدة البيانات
-    try {
-      const [prefs] = await pool.execute(
-        'SELECT preferred_categories, content_weights, excluded_users FROM user_preferences WHERE user_id = ?',
-        [userId]
-      );
+    const [rows] = await pool.execute(
+      'SELECT preferred_categories, content_weights, excluded_users FROM user_preferences WHERE user_id = ?',
+      [userId]
+    );
 
-      if (prefs.length > 0) {
-        const preferences = {
-          preferred_categories: JSON.parse(prefs[0].preferred_categories || '[]'),
-          content_weights: JSON.parse(prefs[0].content_weights || '{}'),
-          excluded_users: JSON.parse(prefs[0].excluded_users || '[]')
-        };
+    const prefs = rows[0]
+      ? {
+          preferred_categories: JSON.parse(rows[0].preferred_categories || '[]'),
+          content_weights:      JSON.parse(rows[0].content_weights      || '{}'),
+          excluded_users:       JSON.parse(rows[0].excluded_users       || '[]')
+        }
+      : { preferred_categories: [], content_weights: {}, excluded_users: [] };
 
-        return res.json({
-          success: true,
-          data: preferences
-        });
-      }
-    } catch (dbError) {
-      console.error('Error fetching preferences from DB:', dbError);
-      // إذا الجدول غير موجود، نستمر مع التفضيلات الافتراضية
-    }
-
-    // إرجاع تفضيلات افتراضية
-    const defaultPreferences = {
-      preferred_categories: [],
-      content_weights: {},
-      excluded_users: []
-    };
-
-    res.json({
-      success: true,
-      data: defaultPreferences
-    });
+    res.json({ success: true, data: prefs });
   } catch (error) {
     console.error('Get user preferences error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get user preferences'
-    });
+    res.status(500).json({ success: false, message: 'Failed to get preferences' });
   }
 });
-
 // ✅ إضافة route تحديث تفضيلات المستخدم
 app.put('/api/user/preferences', authenticateToken, async (req, res) => {
   try {
