@@ -431,43 +431,35 @@ async createAdminIfNotExists(req, res) {
   },
 
   async refreshToken(req, res) {
-    try {
-      // Check if user exists in request (from middleware)
-      if (!req.user || !req.user.id) {
-        console.log('❌ No user in refresh token request');
-        return res.status(401).json({ error: 'User not authenticated' });
-      }
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) return res.status(401).json({ error: 'Refresh token required' });
 
-      const userId = req.user.id;
-      console.log('🔄 Refreshing token for user ID:', userId);
+    // التحقق من وجوده في قاعدة البيانات
+    const [rows] = await pool.execute('SELECT * FROM refresh_tokens WHERE token = ?', [refreshToken]);
+    if (rows.length === 0) return res.status(403).json({ error: 'Invalid refresh token' });
 
-      // Get user data from database
-      const user = await User.findById(userId);
-
-      if (!user) {
-        console.log('❌ User not found for refresh token:', userId);
-        return res.status(404).json({ error: 'User not found' });
-      }
-
-      // Create new access token
-      const newAccessToken = jwt.sign(
-        { id: user.id, email: user.email, role: user.role },
-        jwtConfig.secret,
-        { expiresIn: jwtConfig.expiresIn }
-      );
-
-      console.log('✅ Token refreshed for user:', user.username);
-
-      res.json({
-        accessToken: newAccessToken,
-        message: 'Token refreshed successfully'
-      });
-    } catch (error) {
-      console.error('❌ Token refresh error:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    // التحقق من التوقيع
+    try { jwt.verify(refreshToken, jwtConfig.refreshSecret); } catch {
+      return res.status(403).json({ error: 'Invalid refresh token signature' });
     }
-  },
 
+    // ✅ حذف التوكن القديم فورًا
+    await pool.execute('DELETE FROM refresh_tokens WHERE token = ?', [refreshToken]);
+
+    // إنشاء توكنات جديدة
+    const newAccessToken = jwt.sign({ id: rows[0].user_id }, jwtConfig.secret,  { expiresIn: jwtConfig.expiresIn });
+    const newRefreshToken = jwt.sign({ id: rows[0].user_id }, jwtConfig.refreshSecret, { expiresIn: jwtConfig.refreshExpiresIn });
+
+    // حفظ الـ Refresh Token الجديد
+    await pool.execute('INSERT INTO refresh_tokens (user_id, token) VALUES (?, ?)', [rows[0].user_id, newRefreshToken]);
+
+    res.json({ accessToken: newAccessToken, refreshToken: newRefreshToken });
+  } catch (error) {
+    console.error('❌ Refresh token error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+},
   async getProfile(req, res) {
     try {
       // Check if user exists in request
