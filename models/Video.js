@@ -4,20 +4,20 @@ import path from 'path';
 
 export class Video {
   // ============ الأساسية ============
-  static async create(videoData) {
-    const { user_id, video_url, thumbnail, description, is_public = true } = videoData;
-    
-    // ✅ التأكد من عدم وجود قيم undefined
-    const safeDescription = description || null;
-    const safeThumbnail = thumbnail || '/default-thumbnail.jpg';
-    
-    const [result] = await pool.execute(
-      'INSERT INTO videos (user_id, path, thumbnail, description, is_public) VALUES (?, ?, ?, ?, ?)',
-      [user_id, video_url, safeThumbnail, safeDescription, is_public]
-    );
-    
-    return result.insertId;
-  }
+ static async create(videoData) {
+  const { user_id, video_url, thumbnail, description, is_public = true, subspace_video_id = null, subspace_thumbnail_id = null } = videoData;
+
+  const safeDescription = description || null;
+  const safeThumbnail = thumbnail || '/default-thumbnail.jpg';
+
+  const [result] = await pool.execute(
+    `INSERT INTO videos (user_id, video_url, thumbnail, description, is_public, subspace_video_id, subspace_thumbnail_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [user_id, video_url, safeThumbnail, safeDescription, is_public, subspace_video_id, subspace_thumbnail_id]
+  );
+
+  return result.insertId;
+}
 
   // ✅ الحصول على فيديوهات المستخدم مع الفرز
   static async getUserVideos(userId, sortBy = 'latest') {
@@ -398,39 +398,54 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
   }
 
   static async deleteVideoAdmin(videoId, reason = '') {
-    try {
-      const [videos] = await pool.execute('SELECT * FROM videos WHERE id = ?', [videoId]);
-      if (videos.length === 0) {
-        throw new Error('Video not found');
-      }
+  try {
+    // جلب بيانات الفيديو
+    const [videos] = await pool.execute('SELECT * FROM videos WHERE id = ?', [videoId]);
+    if (videos.length === 0) {
+      throw new Error('Video not found');
+    }
 
-      const video = videos[0];
+    const video = videos[0];
 
+    // حذف ملفات Subspace أولاً
+    if (video.subspace_video_id) {
+      await subspaceClient.deleteFile(video.subspace_video_id);
+    }
+    if (video.subspace_thumbnail_id) {
+      await subspaceClient.deleteFile(video.subspace_thumbnail_id);
+    }
+
+    // حذف الملفات المحلية القديمة
+    if (video.path) {
       const filePath = path.join(process.cwd(), 'uploads', path.basename(video.path));
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
       }
-
-      if (video.thumbnail && !video.thumbnail.includes('default-thumbnail')) {
-        const thumbPath = path.join(process.cwd(), 'thumbnails', path.basename(video.thumbnail));
-        if (fs.existsSync(thumbPath)) {
-          fs.unlinkSync(thumbPath);
-        }
-      }
-
-      const [result] = await pool.execute(
-        'UPDATE videos SET deleted_by_admin = TRUE, deletion_reason = ?, deleted_at = NOW() WHERE id = ?',
-        [reason || 'Admin deletion', videoId]
-      );
-
-      await pool.execute('DELETE FROM reports WHERE video_id = ?', [videoId]);
-
-      return result.affectedRows > 0;
-    } catch (error) {
-      console.error('Error in Video.deleteVideoAdmin:', error);
-      throw error;
     }
+
+    if (video.thumbnail && !video.thumbnail.includes('default-thumbnail')) {
+      const thumbPath = path.join(process.cwd(), 'thumbnails', path.basename(video.thumbnail));
+      if (fs.existsSync(thumbPath)) {
+        fs.unlinkSync(thumbPath);
+      }
+    }
+
+    // تحديث حالة الحذف في جدول الفيديو
+    const [result] = await pool.execute(
+      'UPDATE videos SET deleted_by_admin = TRUE, deletion_reason = ?, deleted_at = NOW() WHERE id = ?',
+      [reason || 'Admin deletion', videoId]
+    );
+
+    // حذف أي تقارير مرتبطة
+    await pool.execute('DELETE FROM reports WHERE video_id = ?', [videoId]);
+
+    return result.affectedRows > 0;
+  } catch (error) {
+    console.error('Error in Video.deleteVideoAdmin:', error);
+    throw error;
   }
+}
+
 
   // ============ المستخدم ============
   static async getUserVideo(userId) {
