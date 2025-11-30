@@ -73,6 +73,30 @@ export const initializeDatabase = async () => {
       )
     `);
 
+    // ✅ أعمدة إضافية مع EXISTS لتجنب errors إذا كانت موجودة
+    const addCol = async (colDef) => {
+      try { await connection.execute(colDef); } 
+      catch (e) { 
+        if (e.code !== 'ER_DUP_FIELDNAME') throw e;
+        console.log(`⚠️ Column already exists`);
+      }
+    };
+
+    await addCol(`ALTER TABLE users ADD COLUMN is_private BOOLEAN DEFAULT FALSE`);
+    await addCol(`ALTER TABLE users ADD COLUMN allow_dms BOOLEAN DEFAULT TRUE`);
+    await addCol(`ALTER TABLE users ADD COLUMN show_activity_status BOOLEAN DEFAULT TRUE`);
+    await addCol(`ALTER TABLE users ADD COLUMN otp_code VARCHAR(6)`);
+    await addCol(`ALTER TABLE users ADD COLUMN otp_expires TIMESTAMP NULL`);
+
+    connection.release();
+    console.log('✅ All DB tables / columns ready');
+  } catch (error) {
+    console.error('❌ Database initialization error:', error);
+    throw error;
+  }
+};
+
+
     // ✅ تحديث جدول المستخدمين لإضافة أعمدة الإعدادات الجديدة
     // إضافة أعمدة الإعدادات الجديدة (بدون IF NOT EXISTS)
 await connection.execute(`
