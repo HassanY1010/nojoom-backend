@@ -275,14 +275,16 @@ export const videoController = {
       const updatedVideo = await Video.findById(replaceVideoId);
       return res.status(200).json({ message: "Video replaced successfully", video: updatedVideo });
     }
-
-    const videoId = await Video.create({
-      user_id: req.user.id,
-      video_url: publicUrl,
-      thumbnail: thumbnailPublicUrl,
-      description: description || "",
-      is_public: true,
-    });
+const videoId = await Video.create({
+  user_id: req.user.id,
+  video_url: publicUrl,
+  thumbnail: thumbnailPublicUrl,
+  description: description || "",
+  is_public: true,
+  path: publicUrl, // ✅ أضفنا path هنا
+  subspace_video_id: null,
+  subspace_thumbnail_id: null
+});
 
     const video = await Video.findById(videoId);
     return res.status(201).json({ message: "Video uploaded successfully", video });
@@ -805,11 +807,8 @@ export const videoController = {
         [userId, limit, offset]
       );
 
-      // ✅ تعيين قيم افتراضية للروابط
-      rows.forEach(v => {
-        if (!v.thumbnail) v.thumbnail = '/default-thumbnail.jpg';
-        if (!v.video_url)  v.video_url  = '/default-video.mp4';
-      });
+    rows.forEach(v => { if (!v.thumbnail) v.thumbnail = '/default-thumbnail.jpg'; 
+      if (!v.video_url) v.video_url = '/default-video.mp4'; });
 
       // ✅ العدد الإجمالي (لتفعيل الترقيم لاحقاً)
       const [totalRes] = await pool.execute(
