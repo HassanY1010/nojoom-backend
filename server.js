@@ -285,28 +285,15 @@ app.get('/api/user/watch-history', authenticateToken, async (req, res) => {
       }
 
       const [history] = await pool.execute(
-        `SELECT 
-          wh.*,
-          v.id as video_id,
-          v.${titleColumn} as title,
-          v.${descriptionColumn} as description,
-          v.url,
-          v.thumbnail,
-          v.duration,
-          v.views,
-          v.likes,
-          v.created_at as video_created_at,
-          u.id as owner_id,
-          u.username as owner_username,
-          u.avatar as owner_avatar
-         FROM watch_history wh
-         JOIN videos v ON wh.video_id = v.id
-         JOIN users u ON v.user_id = u.id
-         WHERE wh.user_id = ?
-         ORDER BY wh.updated_at DESC
-         LIMIT ? OFFSET ?`,
-        [userId, limit, offset]
-      );
+  `SELECT wh.*, v.id as video_id, v.url, u.username as owner_username
+   FROM watch_history wh
+   JOIN videos v ON wh.video_id = v.id
+   JOIN users u ON v.user_id = u.id
+   WHERE wh.user_id = ?
+   ORDER BY wh.updated_at DESC
+   LIMIT ? OFFSET ?`,
+  [userId, limit, offset]
+);
 
       const [totalCount] = await pool.execute(
         'SELECT COUNT(*) as total FROM watch_history WHERE user_id = ?',
