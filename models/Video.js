@@ -141,7 +141,7 @@ static async create(videoData) {
   static async getVideosFromFollowingUsers(userId, limit = 10) {
   try {
     const safeUserId = parseInt(userId) || 0;
-    const safeLimit = parseInt(limit) || 10;
+    const safeLimit  = parseInt(limit) || 10;
 
     const [rows] = await pool.execute(
       `SELECT v.*, u.username, u.avatar,
@@ -157,7 +157,7 @@ static async create(videoData) {
        GROUP BY v.id
        ORDER BY v.created_at DESC
        LIMIT ?`,
-      [safeUserId, safeUserId, safeLimit]   // 3 معامل = 3 ?
+      [safeUserId, safeUserId, safeLimit]   // 3 معامل = 3 ؟
     );
     return rows;
   } catch (error) {
@@ -165,7 +165,6 @@ static async create(videoData) {
     return [];
   }
 }
-
 static async getVideosByPreferences(userId, preferences, limit = 10) {
   try {
     let { preferred_categories = [], excluded_users = [] } = preferences;
@@ -617,7 +616,7 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
      WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
      ORDER BY COALESCE(v.views, 0) DESC 
      LIMIT ?`,
-    [safeLimit]          // 1 معامل = 1 ?
+    [safeLimit]          // 1 معامل = 1 ؟
   );
   return rows;
 }
