@@ -278,34 +278,31 @@ async recordInteraction(interaction) {
   /**
    * الحصول على فيديوهات المتابَعين
    */
-  async getFollowingVideos(userId, followingIds, limit) {
-    if (followingIds.length === 0) return [];
-    
-    try {
-      // إصلاح المشكلة: إنشاء placeholders للمصفوفة
-      const placeholders = followingIds.map(() => '?').join(',');
-      
-      const [videos] = await pool.execute(
-        `SELECT v.*, u.username, u.avatar,
-                COUNT(DISTINCT l.user_id) as likes,
-                EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-         FROM videos v
-         JOIN users u ON v.user_id = u.id
-         LEFT JOIN likes l ON v.id = l.video_id
-         WHERE v.user_id IN (${placeholders})
-           AND v.deleted_by_admin = FALSE 
-           AND u.is_banned = FALSE
-         GROUP BY v.id
-         ORDER BY v.created_at DESC
-         LIMIT ?`,
-        [userId, ...followingIds, limit]
-      );
-      return videos;
-    } catch (error) {
-      console.error('Error getting following videos:', error);
-      return [];
-    }
+ async getFollowingVideos(userId, followingIds, limit) {
+  try {
+    if (!followingIds.length) return [];
+    const placeholders = followingIds.map(() => '?').join(',');
+    const [videos] = await pool.execute(
+      `SELECT v.*, u.username, u.avatar,
+              COUNT(DISTINCT l.user_id) as likes,
+              EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+       FROM videos v
+       JOIN users u ON v.user_id = u.id
+       LEFT JOIN likes l ON v.id = l.video_id
+       WHERE v.user_id IN (${placeholders})
+         AND v.deleted_by_admin = FALSE 
+         AND u.is_banned = FALSE
+       GROUP BY v.id
+       ORDER BY v.created_at DESC
+       LIMIT ?`,
+      [userId, ...followingIds, limit]
+    );
+    return videos;
+  } catch (error) {
+    console.error('Error getting following videos:', error);
+    return [];
   }
+}
 
   /**
    * الحصول على فيديوهات بناءً على الاهتمامات
@@ -351,27 +348,28 @@ async recordInteraction(interaction) {
    * الحصول على الفيديوهات الشائعة
    */
   async getPopularVideos(userId, limit) {
-    try {
-      const [videos] = await pool.execute(
-        `SELECT v.*, u.username, u.avatar,
-                COUNT(DISTINCT l.user_id) as likes,
-                EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-         FROM videos v
-         JOIN users u ON v.user_id = u.id
-         LEFT JOIN likes l ON v.id = l.video_id
-         WHERE v.deleted_by_admin = FALSE 
-           AND u.is_banned = FALSE
-         GROUP BY v.id
-         ORDER BY v.views DESC, v.created_at DESC
-         LIMIT ?`,
-        [userId, limit]
-      );
-      return videos;
-    } catch (error) {
-      console.error('Error getting popular videos:', error);
-      return [];
-    }
+  try {
+    const [videos] = await pool.execute(
+      `SELECT v.*, u.username, u.avatar,
+              COUNT(DISTINCT l.user_id) as likes,
+              EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+       FROM videos v
+       JOIN users u ON v.user_id = u.id
+       LEFT JOIN likes l ON v.id = l.video_id
+       WHERE v.deleted_by_admin = FALSE 
+         AND u.is_banned = FALSE
+       GROUP BY v.id
+       ORDER BY v.views DESC, v.created_at DESC
+       LIMIT ?`,
+      [userId, limit]
+    );
+    return videos;
+  } catch (error) {
+    console.error('Error getting popular videos:', error);
+    return [];
   }
+}
+
 
   /**
    * إزالة الفيديوهات المكررة
