@@ -103,10 +103,15 @@ export const usersController = {
       );
 
       // تحديث آخر تسجيل دخول
-      await pool.execute(
+            await pool.execute(
         'UPDATE users SET last_login = NOW() WHERE id = ?',
         [user.id]
       );
+
+      // ✅ بناء الرابط الكامل للصورة
+      const avatarUrl = user.avatar
+        ? `${process.env.VITE_API_URL}${user.avatar}`
+        : `${process.env.VITE_API_URL}/default-avatar.png`;
 
       console.log('✅ Login successful for user:', {
         id: user.id,
@@ -124,7 +129,7 @@ export const usersController = {
           id: user.id,
           username: user.username,
           email: user.email,
-          avatar: user.avatar,
+          avatar: avatarUrl,
           role: user.role,
           bio: user.bio,
           social_links: user.social_links,
@@ -150,7 +155,6 @@ export const usersController = {
       });
     }
   },
-
   // ==================== إنشاء حساب مدير (للتطوير) ====================
 
   // ✅ دالة لإنشاء حساب مدير بدون تشفير
@@ -214,7 +218,6 @@ export const usersController = {
   },
 
   // ==================== الملف الشخصي ====================
-
   // ✅ الحصول على بيانات مستخدم مع فيديوهاته
   async getProfile(req, res) {
     try {
@@ -237,6 +240,12 @@ export const usersController = {
       }
 
       const user = users[0];
+
+      // ✅ بناء رابط كامل للصورة
+      const avatarUrl = user.avatar
+        ? `${process.env.VITE_API_URL}${user.avatar}`
+        : `${process.env.VITE_API_URL}/default-avatar.png`;
+
       console.log('✅ User found:', user.id, user.username, 'Role:', user.role);
 
       // التحقق إذا كان المستخدم الحالي يتابع هذا المستخدم
@@ -271,7 +280,10 @@ export const usersController = {
       }
 
       res.json({
-        user,
+        user: {
+          ...user,
+          avatar: avatarUrl // استبدل بالرابط الكامل
+        },
         videos,
         isFollowing
       });
@@ -328,13 +340,18 @@ export const usersController = {
       const user = await User.findById(userId);
       if (!user) return res.status(404).json({ error: 'User not found after update' });
 
+      // ✅ بناء رابط كامل للصورة
+      const avatarUrl = user.avatar
+        ? `${process.env.VITE_API_URL}${user.avatar}`
+        : `${process.env.VITE_API_URL}/default-avatar.png`;
+
       res.json({
         message: 'Profile updated successfully',
         user: {
           id: user.id,
           username: user.username,
           email: user.email,
-          avatar: user.avatar,
+          avatar: avatarUrl, // أرسل الرابط الكامل
           bio: user.bio,
           social_links: user.social_links,
           role: user.role
@@ -363,13 +380,18 @@ export const usersController = {
 
       const user = await User.findById(userId);
 
+      // ✅ بناء رابط كامل للصورة
+      const avatarUrl = user.avatar
+        ? `${process.env.VITE_API_URL}${user.avatar}`
+        : `${process.env.VITE_API_URL}/default-avatar.png`;
+
       res.json({
         message: 'Social links updated successfully',
         user: {
           id: user.id,
           username: user.username,
           email: user.email,
-          avatar: user.avatar,
+          avatar: avatarUrl, // أرسل الرابط الكامل
           bio: user.bio,
           social_links: user.social_links,
           role: user.role
