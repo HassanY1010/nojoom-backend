@@ -758,79 +758,82 @@ const videoId = await Video.create({
   // ==================== دوال البحث والإحصائيات ====================
 
     // ==================== 📋 GET /api/videos (عام) ====================
-  async getVideos(req, res) {
-    try {
-      // ✅ قيم افتراضية آمنة
-      const page  = Math.max(1, parseInt(req.query.page)  || 1);
-      const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
-      const offset = (page - 1) * limit;
+async getVideos(req, res) {
+  try {
+    // ✅ قيم افتراضية آمنة
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const offset = (page - 1) * limit;
 
-      // ✅ نوع الفرز (views, likes, latest, oldest)
-      const sortBy = ['views','likes','latest','oldest'].includes(req.query.sortBy)
-                       ? req.query.sortBy
-                       : 'latest';
+    // ✅ نوع الفرز (views, likes, latest, oldest)
+    const sortBy = ['views','likes','latest','oldest'].includes(req.query.sortBy)
+                     ? req.query.sortBy
+                     : 'latest';
 
-      let orderSQL = 'v.created_at DESC';
-      switch (sortBy) {
-        case 'views':  orderSQL = 'v.views DESC';      break;
-        case 'likes':  orderSQL = 'likes DESC';       break;
-        case 'oldest': orderSQL = 'v.created_at ASC'; break;
-      }
-
-      const userId = req.user?.id || 0; // optionalAuth يمكن أن يملأه
-
-      // ✅ الاستعلام الأساسي
-      const [rows] = await pool.execute(
-        `SELECT 
-           v.id,
-           v.user_id,
-           v.description,
-           v.video_url,
-           v.thumbnail,
-           v.views,
-           v.created_at,
-           u.username,
-           u.avatar,
-           COUNT(DISTINCT l.user_id)                 AS likes,
-           COUNT(DISTINCT c.id)                      AS comment_count,
-           EXISTS(SELECT 1 FROM likes
-                  WHERE user_id = ? AND video_id = v.id) AS is_liked
-         FROM videos      AS v
-         JOIN users       AS u ON u.id = v.user_id
-         LEFT JOIN likes  AS l ON l.video_id = v.id
-         LEFT JOIN comments AS c ON c.video_id = v.id AND c.deleted_by_admin = FALSE
-         WHERE v.is_public = TRUE
-           AND v.deleted_by_admin = FALSE
-         GROUP BY v.id
-         ORDER BY ${orderSQL}
-         LIMIT ? OFFSET ?`,
-        [userId, limit, offset]
-      );
-
-    rows.forEach(v => { if (!v.thumbnail) v.thumbnail = '/default-thumbnail.jpg'; 
-      if (!v.video_url) v.video_url = '/default-video.mp4'; });
-
-      // ✅ العدد الإجمالي (لتفعيل الترقيم لاحقاً)
-      const [totalRes] = await pool.execute(
-        'SELECT COUNT(*) AS total FROM videos WHERE is_public = TRUE AND deleted_by_admin = FALSE'
-      );
-      const total = totalRes[0].total;
-
-      res.json({
-        success: true,
-        videos: rows,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
-      });
-    } catch (err) {
-      console.error('❌ getVideos error:', err);
-      res.status(500).json({ success: false, error: 'Failed to fetch videos' });
+    let orderSQL = 'v.created_at DESC';
+    switch (sortBy) {
+      case 'views':  orderSQL = 'v.views DESC';      break;
+      case 'likes':  orderSQL = 'likes DESC';       break;
+      case 'oldest': orderSQL = 'v.created_at ASC'; break;
     }
-  },
+
+    const userId = req.user?.id || 0; // optionalAuth يمكن أن يملأه
+
+    // ✅ الاستعلام الأساسي (تأكد من تطابق عدد الـ ? مع عدد العناصر)
+    const [rows] = await pool.execute(
+      `SELECT 
+         v.id,
+         v.user_id,
+         v.description,
+         v.video_url,
+         v.thumbnail,
+         v.views,
+         v.created_at,
+         u.username,
+         u.avatar,
+         COUNT(DISTINCT l.user_id)                 AS likes,
+         COUNT(DISTINCT c.id)                      AS comment_count,
+         EXISTS(SELECT 1 FROM likes
+                WHERE user_id = ? AND video_id = v.id) AS is_liked
+       FROM videos      AS v
+       JOIN users       AS u ON u.id = v.user_id
+       LEFT JOIN likes  AS l ON l.video_id = v.id
+       LEFT JOIN comments AS c ON c.video_id = v.id AND c.deleted_by_admin = FALSE
+       WHERE v.is_public = TRUE
+         AND v.deleted_by_admin = FALSE
+       GROUP BY v.id
+       ORDER BY ${orderSQL}
+       LIMIT ? OFFSET ?`,
+      [userId, parseInt(limit), parseInt(offset)] // ✅ تأكد من تحويلها لأرقام
+    );
+
+    // ✅ تعيين قيم افتراضية للروابط
+    rows.forEach(v => {
+      if (!v.thumbnail) v.thumbnail = '/default-thumbnail.jpg';
+      if (!v.video_url)  v.video_url  = '/default-video.mp4';
+    });
+
+    // ✅ العدد الإجمالي (لتفعيل الترقيم لاحقاً)
+    const [totalRes] = await pool.execute(
+      'SELECT COUNT(*) AS total FROM videos WHERE is_public = TRUE AND deleted_by_admin = FALSE'
+    );
+    const total = totalRes[0].total;
+
+    res.json({
+      success: true,
+      videos: rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (err) {
+    console.error('❌ getVideos error:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch videos' });
+  }
+},
 
   async searchVideos(req, res) {
     try {
