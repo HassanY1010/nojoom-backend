@@ -113,8 +113,12 @@ router.post('/:videoId/progress', authenticateToken, videoController.saveVideoPr
 // 🟩 10) مسارات عامة PUBLIC ROUTES
 // ============================================================
 
-// ضع المسار الثابت "/" بعد كل المسارات الثابتة والديناميكية
-router.get('/', videoController.getVideos);
+// 🔧 الإصلاح: إضافة معالج الدالة المفقود للسطر 117
+router.get('/', (req, res) => {
+  // يمكنك إما استدعاء videoController.getVideos مباشرة
+  // أو إعادة توجيه إلى الدالة المناسبة
+  videoController.getVideos(req, res);
+});
 
 // مسار الفيديو بالـ ID يجب أن يكون آخر شيء
 router.get('/:id', videoController.getVideo);
