@@ -22,45 +22,44 @@ class RecommendationEngine {
   /**
    * تسجيل تفاعل المستخدم في النظام
    */
-async recordInteraction(interaction) {
-  try {
-    // --- الحل النهائي والسليم ---
-    // إذا لم يكن هناك videoId (مثل follow) نخليه null
-    const safeVideoId = interaction.videoId ?? null;
+  async recordInteraction(interaction) {
+    try {
+      // --- الحل النهائي والسليم ---
+      // إذا لم يكن هناك videoId (مثل follow) نخليه null
+      const safeVideoId = interaction.videoId ?? null;
 
-    const { userId, type, weight, metadata, timestamp } = interaction;
+      const { userId, type, weight, metadata, timestamp } = interaction;
 
-    console.log(`📝 Recording interaction: ${type} for user ${userId}, video ${safeVideoId}`);
+      console.log(`📝 Recording interaction: ${type} for user ${userId}, video ${safeVideoId}`);
 
-    const result = await pool.execute(
-      `INSERT INTO user_interactions 
-        (user_id, video_id, interaction_type, weight, metadata, created_at) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        userId,
-        safeVideoId, // 🔥 الآن 100% ليس undefined
-        type,
-        weight || this.weights[type] || 1.0,
-        JSON.stringify(metadata || {}),
-        timestamp || new Date()
-      ]
-    );
+      const result = await pool.execute(
+        `INSERT INTO user_interactions 
+          (user_id, video_id, interaction_type, weight, metadata, created_at) 
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          userId,
+          safeVideoId, // 🔥 الآن 100% ليس undefined
+          type,
+          weight || this.weights[type] || 1.0,
+          JSON.stringify(metadata || {}),
+          timestamp || new Date()
+        ]
+      );
 
-    console.log(`✅ Successfully recorded interaction: ${type}`);
-    return { success: true, id: result[0].insertId };
+      console.log(`✅ Successfully recorded interaction: ${type}`);
+      return { success: true, id: result[0].insertId };
 
-  } catch (error) {
-    console.error('❌ Error recording interaction:', error);
+    } catch (error) {
+      console.error('❌ Error recording interaction:', error);
 
-    if (error.code === 'ER_DUP_ENTRY') {
-      console.log('⚠️ Interaction already recorded, skipping...');
-      return { success: true, duplicate: true };
+      if (error.code === 'ER_DUP_ENTRY') {
+        console.log('⚠️ Interaction already recorded, skipping...');
+        return { success: true, duplicate: true };
+      }
+
+      return { success: false, error: error.message };
     }
-
-    return { success: false, error: error.message };
   }
-}
-
 
   /**
    * تحليل اهتمامات المستخدم بناءً على تفاعلاته
@@ -278,40 +277,72 @@ async recordInteraction(interaction) {
   /**
    * الحصول على فيديوهات المتابَعين
    */
-async getPopularVideos(userId, limit) {
-  const [videos] = await pool.execute(
-    `SELECT v.*, u.username, u.avatar,
-            COUNT(DISTINCT l.user_id) as likes,
-            EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-     FROM videos v
-     JOIN users u ON v.user_id = u.id
-     LEFT JOIN likes l ON v.id = l.video_id
-     WHERE v.deleted_by_admin = FALSE 
-       AND u.is_banned = FALSE
-     GROUP BY v.id
-     ORDER BY v.views DESC, v.created_at DESC
-     LIMIT ?`,
-    [userId, parseInt(limit)]    // 2 معامل = 2 ?
-  );
-  return videos;
-}
+  async getFollowingVideos(userId, followingIds, limit) {
+    if (!followingIds.length) return [];
+
+    const placeholders = followingIds.map(() => '?').join(',');
+    const sql = `
+      SELECT v.*, u.username, u.avatar,
+             COUNT(DISTINCT l.user_id) as likes,
+             EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+      FROM videos v
+      JOIN users u ON v.user_id = u.id
+      LEFT JOIN likes l ON v.id = l.video_id
+      WHERE v.user_id IN (${placeholders})
+        AND v.deleted_by_admin = FALSE 
+        AND u.is_banned = FALSE
+      GROUP BY v.id
+      ORDER BY v.created_at DESC
+      LIMIT ?
+    `;
+    // عدد المعاملات = 1 + followingIds.length + 1
+    const params = [userId, ...followingIds, parseInt(limit)];
+    const [videos] = await pool.execute(sql, params);
+    return videos;
+  }
 
   /**
    * الحصول على فيديوهات بناءً على الاهتمامات
    */
-async getInterestBasedVideos(userId, interests, limit) {
-  try {
-    const topTags = Object.entries(interests.tags)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([tag]) => tag);
+  async getInterestBasedVideos(userId, interests, limit) {
+    try {
+      const topTags = Object.entries(interests.tags)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([tag]) => tag);
 
-    if (topTags.length === 0) return [];
+      if (topTags.length === 0) return [];
 
-    const searchTerms = topTags.map(t => `%${t}%`);
-    const placeholders = searchTerms.map(() => 'v.description LIKE ?').join(' OR ');
+      const searchTerms = topTags.map(t => `%${t}%`);
+      const placeholders = searchTerms.map(() => 'v.description LIKE ?').join(' OR ');
 
-    const params = [userId, ...searchTerms, parseInt(limit)]; // 1 + n + 1
+      const params = [userId, ...searchTerms, parseInt(limit)]; // 1 + n + 1
+      const [videos] = await pool.execute(
+        `SELECT v.*, u.username, u.avatar,
+                COUNT(DISTINCT l.user_id) as likes,
+                EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+         FROM videos v
+         JOIN users u ON v.user_id = u.id
+         LEFT JOIN likes l ON v.id = l.video_id
+         WHERE (${placeholders})
+           AND v.deleted_by_admin = FALSE 
+           AND u.is_banned = FALSE
+         GROUP BY v.id
+         ORDER BY v.views DESC, v.created_at DESC
+         LIMIT ?`,
+        params
+      );
+      return videos;
+    } catch (error) {
+      console.error('Error getting interest-based videos:', error);
+      return [];
+    }
+  }
+
+  /**
+   * الحصول على الفيديوهات الشائعة
+   */
+  async getPopularVideos(userId, limit) {
     const [videos] = await pool.execute(
       `SELECT v.*, u.username, u.avatar,
               COUNT(DISTINCT l.user_id) as likes,
@@ -319,40 +350,15 @@ async getInterestBasedVideos(userId, interests, limit) {
        FROM videos v
        JOIN users u ON v.user_id = u.id
        LEFT JOIN likes l ON v.id = l.video_id
-       WHERE (${placeholders})
-         AND v.deleted_by_admin = FALSE 
+       WHERE v.deleted_by_admin = FALSE 
          AND u.is_banned = FALSE
        GROUP BY v.id
        ORDER BY v.views DESC, v.created_at DESC
        LIMIT ?`,
-      params
+      [userId, parseInt(limit)]    // 2 معامل = 2 ؟
     );
     return videos;
-  } catch (error) {
-    console.error('Error getting interest-based videos:', error);
-    return [];
   }
-}
-  /**
-   * الحصول على الفيديوهات الشائعة
-   */
-async getPopularVideos(userId, limit) {
-  const [videos] = await pool.execute(
-    `SELECT v.*, u.username, u.avatar,
-            COUNT(DISTINCT l.user_id) as likes,
-            EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-     FROM videos v
-     JOIN users u ON v.user_id = u.id
-     LEFT JOIN likes l ON v.id = l.video_id
-     WHERE v.deleted_by_admin = FALSE 
-       AND u.is_banned = FALSE
-     GROUP BY v.id
-     ORDER BY v.views DESC, v.created_at DESC
-     LIMIT ?`,
-    [userId, parseInt(limit)]
-  );
-  return videos;
-}
 
   /**
    * إزالة الفيديوهات المكررة
@@ -521,34 +527,6 @@ async getPopularVideos(userId, limit) {
         following: 0,
         modelUpdated: new Date()
       };
-    }
-  }
-
-  /**
-   * الحصول على فيديوهات المتابَعين (بديل)
-   */
-  async getFollowingVideosAlternative(userId, limit = 10) {
-    try {
-      const [videos] = await pool.execute(
-        `SELECT v.*, u.username, u.avatar,
-                COUNT(DISTINCT l.user_id) as likes,
-                EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-         FROM videos v
-         JOIN users u ON v.user_id = u.id
-         JOIN followers f ON v.user_id = f.following_id
-         LEFT JOIN likes l ON v.id = l.video_id
-         WHERE f.follower_id = ? 
-           AND v.deleted_by_admin = FALSE 
-           AND u.is_banned = FALSE
-         GROUP BY v.id
-         ORDER BY v.created_at DESC
-         LIMIT ?`,
-        [userId, userId, limit]
-      );
-      return videos;
-    } catch (error) {
-      console.error('Error getting following videos (alternative):', error);
-      return [];
     }
   }
 }
