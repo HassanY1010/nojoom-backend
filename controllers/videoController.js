@@ -778,23 +778,25 @@ async getVideos(req, res) {
     const safeLimit = parseInt(limit);         // ← معامل 2
     const safeOffset = parseInt(offset);       // ← معامل 3
 
-    const [rows] = await pool.execute(
-      `SELECT 
-         v.id, v.user_id, v.description, v.video_url, v.thumbnail, v.views, v.created_at,
-         u.username, u.avatar,
-         COUNT(DISTINCT l.user_id) AS likes,
-         COUNT(DISTINCT c.id)      AS comment_count,
-         EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) AS is_liked
-       FROM videos v
-       JOIN users u ON u.id = v.user_id
-       LEFT JOIN likes  l ON l.video_id = v.id
-       LEFT JOIN comments c ON c.video_id = v.id AND c.deleted_by_admin = FALSE
-       WHERE v.is_public = TRUE AND v.deleted_by_admin = FALSE
-       GROUP BY v.id
-       ORDER BY ${orderSQL}
-       LIMIT ? OFFSET ?`,
-      [userId, safeLimit, safeOffset]   // 3 عناصر = 3 ?
-    );
+    // ✅ نستخدم string template فقط لـ ORDER / LIMIT لأن MySQL لا يقبل ? فيها
+    const sql = `
+      SELECT 
+        v.id, v.user_id, v.description, v.video_url, v.thumbnail, v.views, v.created_at,
+        u.username, u.avatar,
+        COUNT(DISTINCT l.user_id) AS likes,
+        COUNT(DISTINCT c.id)      AS comment_count,
+        EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) AS is_liked
+      FROM videos v
+      JOIN users u ON u.id = v.user_id
+      LEFT JOIN likes  l ON l.video_id = v.id
+      LEFT JOIN comments c ON c.video_id = v.id AND c.deleted_by_admin = FALSE
+      WHERE v.is_public = TRUE AND v.deleted_by_admin = FALSE
+      GROUP BY v.id
+      ORDER BY ${orderSQL}
+      LIMIT ${safeLimit} OFFSET ${safeOffset}
+    `;
+
+    const [rows] = await pool.execute(sql, [userId]);
 
     rows.forEach(v => {
       if (!v.thumbnail) v.thumbnail = '/default-thumbnail.jpg';
