@@ -105,6 +105,9 @@ app.use(generalLimiter);
 // ======================================================
 // 4. Special CORS for Video Upload - ✅ ADDED
 // ======================================================
+// ======================================================
+// 4. Special CORS for Video Upload - ✅ FIXED + URL REWRITE
+// ======================================================
 app.use('/api/videos/upload', (req, res, next) => {
   res.header('Access-Control-Allow-Origin', process.env.CLIENT_URL);
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -114,6 +117,28 @@ app.use('/api/videos/upload', (req, res, next) => {
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
+  next();
+});
+
+// ======================================================
+// 4-B. Auto-fix video & thumbnail URLs for ALL /api/videos routes
+// ======================================================
+app.use('/api/videos', (req, res, next) => {
+  const originalJson = res.json;
+  res.json = function (body) {
+    if (body?.videos?.length) {
+      body.videos = body.videos.map(v => ({
+        ...v,
+        video_url: v.video_url?.startsWith('http')
+          ? v.video_url
+          : `https://ulcaeqbffsegiibgllrh.supabase.co/storage/v1/object/public/videos${v.video_url}`,
+        thumbnail: v.thumbnail?.startsWith('http')
+          ? v.thumbnail
+          : `https://ulcaeqbffsegiibgllrh.supabase.co/storage/v1/object/public/videos${v.thumbnail}`
+      }));
+    }
+    return originalJson.call(this, body);
+  };
   next();
 });
 
@@ -145,7 +170,7 @@ app.use('/api/notifications', notificationRoutes);
 // 7. Static Files
 // ======================================================
 app.use('/thumbnails', express.static(path.join(__dirname, 'thumbnails')));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/default-avatar.png', express.static(path.join(__dirname, 'public', 'default-avatar.png')));
 app.use('/default-thumbnail.jpg', express.static(path.join(__dirname, 'public', 'default-thumbnail.jpg')));
 
