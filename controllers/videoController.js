@@ -212,86 +212,87 @@ export const videoController = {
   // ==================== دوال الرفع والحصول على الفيديوهات ====================
   async uploadVideo(req, res) {
   try {
-    if (!req.file) return res.status(400).json({ error: "Video file is required" });
+    if (!req.file) return res.status(400).json({ error: 'Video file is required' });
 
     const { description, replaceVideoId } = req.body;
-    const file = req.file;
-    const extension = file.originalname.split(".").pop();
-    const uniqueName = `${Date.now()}_${Math.random().toString(36).substr(2)}.${extension}`;
+    const file        = req.file;
+    const extension   = file.originalname.split('.').pop();
+    const uniqueName  = `${Date.now()}_${Math.random().toString(36).slice(2)}.${extension}`;
 
-    // -----------------------
-    // رفع الفيديو إلى Supabase
-    // -----------------------
-    const { error: uploadError } = await supabase.storage
+    /* 1) رفع الفيديو إلى Supabase */
+    const videoTempPath = file.path; // مسار مؤقت من multer
+    const { error: upErr } = await supabase.storage
       .from(process.env.SUPABASE_BUCKET)
-      .upload(uniqueName, fs.createReadStream(file.path), { contentType: file.mimetype });
+      .upload(uniqueName, fs.createReadStream(videoTempPath), {
+        contentType: file.mimetype,
+        upsert: false
+      });
+    if (upErr) throw upErr;
 
-    if (uploadError) throw uploadError;
-
-    const publicUrl = supabase.storage
+    const { data: { publicUrl: videoUrl } } = supabase.storage
       .from(process.env.SUPABASE_BUCKET)
-      .getPublicUrl(uniqueName).data.publicUrl;
+      .getPublicUrl(uniqueName);
 
-    if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-
-    // -----------------------
-    // توليد الـ Thumbnail
-    // -----------------------
-    let thumbnailPublicUrl = null;
+    /* 2) توليد thumbnail */
+    const tempDir   = join(__dirname, '..', 'temp');
     const thumbName = `thumb_${uniqueName}.jpg`;
-    const tempDir = join(__dirname, '..', 'temp');
-    const thumbLocal = join(tempDir, thumbName);
-
+    const thumbLocal= join(tempDir, thumbName);
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
+    let thumbPublicUrl = '/default-thumbnail.jpg';
     try {
-      await ThumbnailService.generateThumbnail(file.path, tempDir, thumbName);
+      await ThumbnailService.generateThumbnail(videoTempPath, tempDir, thumbName);
 
-      const { error: thumbError } = await supabase.storage
+      const { error: thErr } = await supabase.storage
         .from(process.env.SUPABASE_BUCKET)
-        .upload(`thumbnails/${thumbName}`, fs.createReadStream(thumbLocal), { contentType: "image/jpeg" });
-
-      if (thumbError) throw thumbError;
-
-      thumbnailPublicUrl = supabase.storage
-        .from(process.env.SUPABASE_BUCKET)
-        .getPublicUrl(`thumbnails/${thumbName}`).data.publicUrl;
-
+        .upload(`thumbnails/${thumbName}`, fs.createReadStream(thumbLocal), {
+          contentType: 'image/jpeg'
+        });
+      if (!thErr) {
+        const { data } = supabase.storage
+          .from(process.env.SUPABASE_BUCKET)
+          .getPublicUrl(`thumbnails/${thumbName}`);
+        thumbPublicUrl = data.publicUrl;
+      }
       if (fs.existsSync(thumbLocal)) fs.unlinkSync(thumbLocal);
-
-    } catch (err) {
-      console.error("❌ Thumbnail error:", err);
-      thumbnailPublicUrl = "/default-thumbnail.jpg";
+    } catch (e) {
+      console.error('⚠️ Thumbnail generation failed:', e.message);
     }
 
-    // -----------------------
-    // حفظ الفيديو أو استبداله
-    // -----------------------
+    /* 3) حذف الملف المؤقت بعد الانتهاء تماماً */
+    if (fs.existsSync(videoTempPath)) fs.unlinkSync(videoTempPath);
+
+    /* 4) حفظ البيانات فى قاعدة البيانات */
+    const videoData = {
+      user_id     : req.user.id,
+      video_url   : videoUrl,
+      thumbnail   : thumbPublicUrl,
+      description : description || '',
+      is_public   : true,
+      path        : videoUrl // نخزن نفس الرابط هنا لتجنب أى مشكلة
+    };
+
     if (replaceVideoId) {
       await pool.execute(
-        "UPDATE videos SET video_url = ?, thumbnail = ?, description = ? WHERE id = ? AND user_id = ?",
-        [publicUrl, thumbnailPublicUrl, description || null, replaceVideoId, req.user.id]
+        `UPDATE videos
+           SET video_url = ?, thumbnail = ?, description = ?
+         WHERE id = ? AND user_id = ?`,
+        [videoData.video_url, videoData.thumbnail, videoData.description,
+         replaceVideoId, req.user.id]
       );
       const updatedVideo = await Video.findById(replaceVideoId);
-      return res.status(200).json({ message: "Video replaced successfully", video: updatedVideo });
+      return res.status(200).json({ message: 'Video replaced', video: updatedVideo });
     }
-const videoId = await Video.create({
-  user_id: req.user.id,
-  video_url: publicUrl,
-  thumbnail: thumbnailPublicUrl,
-  description: description || "",
-  is_public: true,
-  path: publicUrl, // ✅ أضفنا path هنا
-  subspace_video_id: null,
-  subspace_thumbnail_id: null
-});
 
-    const video = await Video.findById(videoId);
-    return res.status(201).json({ message: "Video uploaded successfully", video });
+    const newId = await Video.create(videoData);
+    const video = await Video.findById(newId);
+    return res.status(201).json({ message: 'Video uploaded', video });
 
-  } catch (error) {
-    console.error("❌ Upload error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+  } catch (err) {
+    console.error('❌ uploadVideo error:', err);
+    /* تنظيف الملف المؤقت فى حال فشل أى خطوة */
+    if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 },
 
