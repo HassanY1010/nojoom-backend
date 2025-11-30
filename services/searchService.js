@@ -3,141 +3,84 @@ import { pool, executeQuery } from '../config/db.js';
 
 class SearchService {
   // البحث في الفيديوهات
-  async searchVideos({ query, hashtags, filter, userId, limit, offset }) {
-    try {
-      let whereConditions = ['v.status = "active"'];
-      let orderBy = '';
-      const params = [];
+ async searchVideos({ query, hashtags, filter, userId, limit, offset }) {
+  let whereConditions = ['v.status = "active"'];
+  let orderBy = '';
+  const params = [];
 
-      // البحث النصي
-      if (query) {
-        whereConditions.push('(v.description LIKE ? OR v.title LIKE ?)');
-        params.push(`%${query}%`, `%${query}%`);
-      }
-
-      // البحث بالهاشتاجات
-      if (hashtags && hashtags.length > 0) {
-        const hashtagConditions = hashtags.map(() => 'v.description LIKE ?');
-        whereConditions.push(`(${hashtagConditions.join(' OR ')})`);
-        hashtags.forEach(hashtag => params.push(`%${hashtag}%`));
-      }
-
-      // التصفية والترتيب
-      switch (filter) {
-        case 'trending':
-          orderBy = 'v.views DESC, v.likes DESC, v.created_at DESC';
-          break;
-        case 'latest':
-          orderBy = 'v.created_at DESC';
-          break;
-        case 'hashtags':
-          if (hashtags && hashtags.length > 0) {
-            orderBy = `(
-              LENGTH(v.description) - LENGTH(REPLACE(v.description, '${hashtags[0]}', ''))
-            ) / LENGTH('${hashtags[0]}') DESC, v.created_at DESC`;
-          } else {
-            orderBy = 'v.created_at DESC';
-          }
-          break;
-        default: // relevance
-          if (query) {
-            orderBy = `(
-              CASE 
-                WHEN v.description LIKE '%${query}%' THEN 3
-                WHEN v.title LIKE '%${query}%' THEN 2
-                ELSE 1
-              END
-            ) DESC, v.views DESC, v.created_at DESC`;
-          } else {
-            orderBy = 'v.created_at DESC';
-          }
-      }
-
-      const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-
-      const sql = `
-        SELECT 
-          v.*,
-          u.id as user_id,
-          u.username,
-          u.avatar,
-          u.bio,
-          (SELECT COUNT(*) FROM likes l WHERE l.video_id = v.id) as likes_count,
-          (SELECT COUNT(*) FROM comments c WHERE c.video_id = v.id AND c.status = 'active') as comment_count,
-          (SELECT EXISTS(SELECT 1 FROM likes l WHERE l.video_id = v.id AND l.user_id = ?)) as is_liked
-        FROM videos v
-        LEFT JOIN users u ON v.user_id = u.id
-        ${whereClause}
-        ORDER BY ${orderBy}
-        LIMIT ? OFFSET ?
-      `;
-
-      const results = await executeQuery(sql, [userId || 0, ...params, limit, offset]);
-      return results;
-    } catch (error) {
-      console.error('Video search error:', error);
-      throw error;
-    }
+  if (query) {
+    whereConditions.push('(v.description LIKE ? OR v.title LIKE ?)');
+    params.push(`%${query}%`, `%${query}%`);
   }
 
-  // البحث في المستخدمين
-  async searchUsers({ query, userId, limit, offset }) {
-    try {
-      let whereConditions = ['u.status = "active"'];
-      const params = [];
-
-      if (query) {
-        whereConditions.push('(u.username LIKE ? OR u.bio LIKE ?)');
-        params.push(`%${query}%`, `%${query}%`);
-      }
-
-      const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-
-      const sql = `
-        SELECT 
-          u.*,
-          (SELECT COUNT(*) FROM follows f WHERE f.following_id = u.id) as followers_count,
-          (SELECT COUNT(*) FROM follows f WHERE f.follower_id = u.id) as following_count,
-          (SELECT EXISTS(SELECT 1 FROM follows f WHERE f.following_id = u.id AND f.follower_id = ?)) as is_following
-        FROM users u
-        ${whereClause}
-        ORDER BY u.username ASC
-        LIMIT ? OFFSET ?
-      `;
-
-      const results = await executeQuery(sql, [userId || 0, ...params, limit, offset]);
-      return results;
-    } catch (error) {
-      console.error('User search error:', error);
-      throw error;
-    }
+  if (hashtags?.length) {
+    const hashtagCond = hashtags.map(() => 'v.description LIKE ?').join(' OR ');
+    whereConditions.push(`(${hashtagCond})`);
+    hashtags.forEach(t => params.push(`%${t}%`));
   }
 
-  // البحث بالهاشتاج
-  async searchByHashtag(hashtag, userId, limit, offset) {
-    try {
-      const sql = `
-        SELECT 
-          v.*,
-          u.id as user_id,
-          u.username,
-          u.avatar,
-          (SELECT COUNT(*) FROM likes l WHERE l.video_id = v.id) as likes_count,
-          (SELECT EXISTS(SELECT 1 FROM likes l WHERE l.video_id = v.id AND l.user_id = ?)) as is_liked
-        FROM videos v
-        LEFT JOIN users u ON v.user_id = u.id
-        WHERE v.status = 'active' AND v.description LIKE ?
-        ORDER BY v.created_at DESC
-        LIMIT ? OFFSET ?
-      `;
-
-      const results = await executeQuery(sql, [userId || 0, `%${hashtag}%`, limit, offset]);
-      return results;
-    } catch (error) {
-      console.error('Hashtag search error:', error);
-      throw error;
-    }
+  switch (filter) {
+    case 'trending': orderBy = 'v.views DESC, v.likes DESC, v.created_at DESC'; break;
+    case 'latest':   orderBy = 'v.created_at DESC'; break;
+    default:         orderBy = 'v.created_at DESC';
   }
+
+  const whereClause = whereConditions.length ? `WHERE ${whereConditions.join(' AND ')}` : '';
+  const sql = `
+    SELECT 
+      v.*, u.id as user_id, u.username, u.avatar, u.bio,
+      (SELECT COUNT(*) FROM likes l WHERE l.video_id = v.id) as likes_count,
+      (SELECT COUNT(*) FROM comments c WHERE c.video_id = v.id AND c.status = 'active') as comment_count,
+      (SELECT EXISTS(SELECT 1 FROM likes l WHERE l.video_id = v.id AND l.user_id = ?)) as is_liked
+    FROM videos v
+    LEFT JOIN users u ON v.user_id = u.id
+    ${whereClause}
+    ORDER BY ${orderBy}
+    LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
+  `;
+
+  return await executeQuery(sql, [userId || 0, ...params]);
+}
+
+async searchUsers({ query, userId, limit, offset }) {
+  const params = [];
+  let whereConditions = ['u.status = "active"'];
+
+  if (query) {
+    whereConditions.push('(u.username LIKE ? OR u.bio LIKE ?)');
+    params.push(`%${query}%`, `%${query}%`);
+  }
+
+  const whereClause = whereConditions.length ? `WHERE ${whereConditions.join(' AND ')}` : '';
+  const sql = `
+    SELECT 
+      u.*,
+      (SELECT COUNT(*) FROM follows f WHERE f.following_id = u.id) as followers_count,
+      (SELECT COUNT(*) FROM follows f WHERE f.follower_id = u.id) as following_count,
+      (SELECT EXISTS(SELECT 1 FROM follows f WHERE f.following_id = u.id AND f.follower_id = ?)) as is_following
+    FROM users u
+    ${whereClause}
+    ORDER BY u.username ASC
+    LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
+  `;
+
+  return await executeQuery(sql, [userId || 0, ...params]);
+}
+
+async searchByHashtag(hashtag, userId, limit, offset) {
+  const sql = `
+    SELECT 
+      v.*, u.id as user_id, u.username, u.avatar,
+      (SELECT COUNT(*) FROM likes l WHERE l.video_id = v.id) as likes_count,
+      (SELECT EXISTS(SELECT 1 FROM likes l WHERE l.video_id = v.id AND l.user_id = ?)) as is_liked
+    FROM videos v
+    LEFT JOIN users u ON v.user_id = u.id
+    WHERE v.status = 'active' AND v.description LIKE ?
+    ORDER BY v.created_at DESC
+    LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
+  `;
+  return await executeQuery(sql, [userId || 0, `%${hashtag}%`]);
+}
 
   // الحصول على الهاشتاجات الرائجة
   async getTrendingHashtags(limit = 10) {
