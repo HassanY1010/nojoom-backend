@@ -4,18 +4,13 @@ import path from 'path';
 
 export class Video {
   // ============ الأساسية ============
- static async create(videoData) {
-  const { user_id, video_url, thumbnail, description, is_public = true, subspace_video_id = null, subspace_thumbnail_id = null } = videoData;
-
-  const safeDescription = description || null;
-  const safeThumbnail = thumbnail || '/default-thumbnail.jpg';
-
+static async create(videoData) {
+  const { user_id, video_url, thumbnail, description, is_public = true, path, subspace_video_id = null, subspace_thumbnail_id = null } = videoData;
   const [result] = await pool.execute(
-    `INSERT INTO videos (user_id, video_url, thumbnail, description, is_public, subspace_video_id, subspace_thumbnail_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [user_id, video_url, safeThumbnail, safeDescription, is_public, subspace_video_id, subspace_thumbnail_id]
+    `INSERT INTO videos (user_id, video_url, thumbnail, description, is_public, path, subspace_video_id, subspace_thumbnail_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [user_id, video_url, thumbnail || '/default-thumbnail.jpg', description || null, is_public, path || video_url, subspace_video_id, subspace_thumbnail_id]
   );
-
   return result.insertId;
 }
 
