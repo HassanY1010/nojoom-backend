@@ -793,7 +793,7 @@ async getVideos(req, res) {
        GROUP BY v.id
        ORDER BY ${orderSQL}
        LIMIT ? OFFSET ?`,
-      [userId, safeLimit, safeOffset]   // ← 3 عناصر = 3 ?
+      [userId, safeLimit, safeOffset]   // 3 عناصر = 3 ?
     );
 
     rows.forEach(v => {
