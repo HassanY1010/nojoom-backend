@@ -34,8 +34,9 @@ export const executeQuery = async (query, params = []) => {
 };
 
 export const initializeDatabase = async () => {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     console.log('✅ Connected to MySQL database');
 
     // ✅ تحديث جدول المستخدمين
@@ -75,8 +76,9 @@ export const initializeDatabase = async () => {
 
     // ✅ أعمدة إضافية مع EXISTS لتجنب errors إذا كانت موجودة
     const addCol = async (colDef) => {
-      try { await connection.execute(colDef); } 
-      catch (e) { 
+      try { 
+        await connection.execute(colDef); 
+      } catch (e) { 
         if (e.code !== 'ER_DUP_FIELDNAME') throw e;
         console.log(`⚠️ Column already exists`);
       }
@@ -87,54 +89,6 @@ export const initializeDatabase = async () => {
     await addCol(`ALTER TABLE users ADD COLUMN show_activity_status BOOLEAN DEFAULT TRUE`);
     await addCol(`ALTER TABLE users ADD COLUMN otp_code VARCHAR(6)`);
     await addCol(`ALTER TABLE users ADD COLUMN otp_expires TIMESTAMP NULL`);
-
-    connection.release();
-    console.log('✅ All DB tables / columns ready');
-  } catch (error) {
-    console.error('❌ Database initialization error:', error);
-    throw error;
-  }
-};
-
-
-    // ✅ تحديث جدول المستخدمين لإضافة أعمدة الإعدادات الجديدة
-    // إضافة أعمدة الإعدادات الجديدة (بدون IF NOT EXISTS)
-await connection.execute(`
-  ALTER TABLE users 
-  ADD COLUMN is_private BOOLEAN DEFAULT FALSE
-`).catch(() => {
-  console.log("⚠️ Column is_private already exists");
-});
-
-await connection.execute(`
-  ALTER TABLE users 
-  ADD COLUMN allow_dms BOOLEAN DEFAULT TRUE
-`).catch(() => {
-  console.log("⚠️ Column allow_dms already exists");
-});
-
-await connection.execute(`
-  ALTER TABLE users 
-  ADD COLUMN show_activity_status BOOLEAN DEFAULT TRUE
-`).catch(() => {
-  console.log("⚠️ Column show_activity_status already exists");
-});
-
-
-    await connection.execute(`
-  ALTER TABLE users 
-  ADD COLUMN otp_code VARCHAR(6)
-`).catch(() => {
-  console.log("⚠️ Column otp_code already exists");
-});
-
-await connection.execute(`
-  ALTER TABLE users 
-  ADD COLUMN otp_expires TIMESTAMP NULL
-`).catch(() => {
-  console.log("⚠️ Column otp_expires already exists");
-});
-
 
     // ✅ إنشاء جدول reset_codes لإعادة تعيين كلمة المرور
     await connection.execute(`
@@ -175,6 +129,7 @@ await connection.execute(`
         INDEX idx_created_at (created_at)
       )
     `);
+
     await connection.execute(`
       CREATE TABLE IF NOT EXISTS broadcast_displays (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -186,25 +141,6 @@ await connection.execute(`
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         UNIQUE KEY unique_broadcast_user (broadcast_id, user_id),
         INDEX idx_broadcast_id (broadcast_id)
-      )
-    `);
-    // ✅ إنشاء جدول المحادثات النشطة
-    await connection.execute(`
-      CREATE TABLE IF NOT EXISTS active_conversations (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user1_id INT NOT NULL,
-        user2_id INT NOT NULL,
-        last_message_id INT,
-        last_message_content TEXT,
-        last_message_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        unread_count INT DEFAULT 0,
-        FOREIGN KEY (user1_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (user2_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (last_message_id) REFERENCES direct_messages(id) ON DELETE SET NULL,
-        UNIQUE KEY unique_conversation (user1_id, user2_id),
-        INDEX idx_user1_id (user1_id),
-        INDEX idx_user2_id (user2_id),
-        INDEX idx_last_message_at (last_message_at)
       )
     `);
 
@@ -229,6 +165,49 @@ await connection.execute(`
         INDEX idx_is_public (is_public),
         INDEX idx_created_at (created_at),
         INDEX idx_deleted_by_admin (deleted_by_admin)
+      )
+    `);
+
+    // ✅ إضافة أعمدة إضافية للفيديوهات
+    await addCol(`ALTER TABLE videos ADD COLUMN shares INT DEFAULT 0`);
+    await addCol(`ALTER TABLE videos ADD COLUMN thumbnail VARCHAR(255)`);
+
+    // ✅ جدول الرسائل الخاصة (Direct Messages)
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS direct_messages (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        sender_id INT NOT NULL,
+        receiver_id INT NOT NULL,
+        content TEXT NOT NULL,
+        is_read BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_sender_id (sender_id),
+        INDEX idx_receiver_id (receiver_id),
+        INDEX idx_created_at (created_at),
+        INDEX idx_is_read (is_read)
+      )
+    `);
+
+    // ✅ إنشاء جدول المحادثات النشطة
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS active_conversations (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user1_id INT NOT NULL,
+        user2_id INT NOT NULL,
+        last_message_id INT,
+        last_message_content TEXT,
+        last_message_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        unread_count INT DEFAULT 0,
+        FOREIGN KEY (user1_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (user2_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (last_message_id) REFERENCES direct_messages(id) ON DELETE SET NULL,
+        UNIQUE KEY unique_conversation (user1_id, user2_id),
+        INDEX idx_user1_id (user1_id),
+        INDEX idx_user2_id (user2_id),
+        INDEX idx_last_message_at (last_message_at)
       )
     `);
 
@@ -322,25 +301,6 @@ await connection.execute(`
       )
     `);
 
-    // ✅ جدول الرسائل الخاصة (Direct Messages) - تم إضافته لإصلاح مشكلة المراسلة
-    await connection.execute(`
-      CREATE TABLE IF NOT EXISTS direct_messages (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        sender_id INT NOT NULL,
-        receiver_id INT NOT NULL,
-        content TEXT NOT NULL,
-        is_read BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE,
-        INDEX idx_sender_id (sender_id),
-        INDEX idx_receiver_id (receiver_id),
-        INDEX idx_created_at (created_at),
-        INDEX idx_is_read (is_read)
-      )
-    `);
-
     await connection.execute(`
       CREATE TABLE IF NOT EXISTS message_displays (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -373,6 +333,9 @@ await connection.execute(`
         INDEX idx_created_at (created_at)
       )
     `);
+
+    // ✅ إضافة عمود last_position لسجل المشاهدة
+    await addCol(`ALTER TABLE watch_history ADD COLUMN last_position DECIMAL(10,2) DEFAULT 0`);
 
     // ✅ جدول تفاعلات المستخدم
     await connection.execute(`
@@ -564,14 +527,6 @@ await connection.execute(`
       )
     `);
 
-    await connection.execute(`
-  ALTER TABLE watch_history 
-  ADD COLUMN last_position DECIMAL(10,2) DEFAULT 0
-`).catch(() => {
-  console.log("⚠️ Column last_position already exists in watch_history");
-});
-
-
     // ✅ جدول التحديات الأسبوعية (Weekly Challenges)
     await connection.execute(`
       CREATE TABLE IF NOT EXISTS challenges (
@@ -649,20 +604,6 @@ await connection.execute(`
       )
     `);
 
-    // ✅ إضافة عمود shares للفيديوهات إذا لم يكن موجوداً
-    await connection.execute(`
-  ALTER TABLE videos 
-  ADD COLUMN shares INT DEFAULT 0
-`).catch(() => {
-  console.log("⚠️ Column shares already exists in videos");
-});
-
-await connection.execute(`
-  ALTER TABLE videos 
-  ADD COLUMN thumbnail VARCHAR(255)
-`).catch(() => {
-  console.log("⚠️ Column thumbnail already exists in videos");
-});
     // ✅ جدول مشاركات الفيديو (Video Shares)
     await connection.execute(`
       CREATE TABLE IF NOT EXISTS video_shares (
@@ -693,16 +634,15 @@ await connection.execute(`
       )
     `);
 
-    connection.release();
-    console.log('✅ All database tables initialized successfully (including AI tables + Video Turbo Engine)');
+    console.log('✅ All tables ready');
   } catch (error) {
-    console.error('❌ Database initialization error:', error);
+    console.error('❌ DB init error:', error);
     throw error;
+  } finally {
+    if (connection) {
+      connection.release();
+    }
   }
+};
 
-};
-export default {
-  pool,
-  executeQuery,
-  initializeDatabase
-};
+export default { pool, executeQuery, initializeDatabase };
