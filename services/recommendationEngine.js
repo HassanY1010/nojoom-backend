@@ -278,69 +278,61 @@ async recordInteraction(interaction) {
   /**
    * الحصول على فيديوهات المتابَعين
    */
-async getFollowingVideos(userId, followingIds, limit) {
-  if (!followingIds.length) return [];
-
-  const placeholders = followingIds.map(() => '?').join(',');
-  const sql = `
-    SELECT v.*, u.username, u.avatar,
-           COUNT(DISTINCT l.user_id) as likes,
-           EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-    FROM videos v
-    JOIN users u ON v.user_id = u.id
-    LEFT JOIN likes l ON v.id = l.video_id
-    WHERE v.user_id IN (${placeholders})
-      AND v.deleted_by_admin = FALSE 
-      AND u.is_banned = FALSE
-    GROUP BY v.id
-    ORDER BY v.created_at DESC
-    LIMIT ?
-  `;
-  const [videos] = await pool.execute(sql, [userId, ...followingIds, parseInt(limit)]);
+async getPopularVideos(userId, limit) {
+  const [videos] = await pool.execute(
+    `SELECT v.*, u.username, u.avatar,
+            COUNT(DISTINCT l.user_id) as likes,
+            EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+     FROM videos v
+     JOIN users u ON v.user_id = u.id
+     LEFT JOIN likes l ON v.id = l.video_id
+     WHERE v.deleted_by_admin = FALSE 
+       AND u.is_banned = FALSE
+     GROUP BY v.id
+     ORDER BY v.views DESC, v.created_at DESC
+     LIMIT ?`,
+    [userId, parseInt(limit)]    // 2 معامل = 2 ?
+  );
   return videos;
 }
-
 
   /**
    * الحصول على فيديوهات بناءً على الاهتمامات
    */
-  async getInterestBasedVideos(userId, interests, limit) {
-    try {
-      // استخراج أهم الكلمات المفتاحية
-      const topTags = Object.entries(interests.tags)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([tag]) => tag);
+async getInterestBasedVideos(userId, interests, limit) {
+  try {
+    const topTags = Object.entries(interests.tags)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([tag]) => tag);
 
-      if (topTags.length === 0) return [];
+    if (topTags.length === 0) return [];
 
-      // بناء استعلام البحث
-      const searchTerms = topTags.map(tag => `%${tag}%`);
-      const placeholders = searchTerms.map(() => 'v.description LIKE ?').join(' OR ');
-      
-      const [videos] = await pool.execute(
-        `SELECT v.*, u.username, u.avatar,
-                COUNT(DISTINCT l.user_id) as likes,
-                EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-         FROM videos v
-         JOIN users u ON v.user_id = u.id
-         LEFT JOIN likes l ON v.id = l.video_id
-         WHERE (${placeholders})
-           AND v.deleted_by_admin = FALSE 
-           AND u.is_banned = FALSE
-         GROUP BY v.id
-         ORDER BY v.views DESC, v.created_at DESC
-         LIMIT ?`,
-        [userId, ...searchTerms, limit]
-      );
-      
-      return videos;
-    } catch (error) {
-      console.error('Error getting interest-based videos:', error);
-      return [];
-    }
+    const searchTerms = topTags.map(t => `%${t}%`);
+    const placeholders = searchTerms.map(() => 'v.description LIKE ?').join(' OR ');
+
+    const params = [userId, ...searchTerms, parseInt(limit)]; // 1 + n + 1
+    const [videos] = await pool.execute(
+      `SELECT v.*, u.username, u.avatar,
+              COUNT(DISTINCT l.user_id) as likes,
+              EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+       FROM videos v
+       JOIN users u ON v.user_id = u.id
+       LEFT JOIN likes l ON v.id = l.video_id
+       WHERE (${placeholders})
+         AND v.deleted_by_admin = FALSE 
+         AND u.is_banned = FALSE
+       GROUP BY v.id
+       ORDER BY v.views DESC, v.created_at DESC
+       LIMIT ?`,
+      params
+    );
+    return videos;
+  } catch (error) {
+    console.error('Error getting interest-based videos:', error);
+    return [];
   }
-
+}
   /**
    * الحصول على الفيديوهات الشائعة
    */
