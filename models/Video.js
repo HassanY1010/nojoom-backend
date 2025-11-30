@@ -5,53 +5,39 @@ import path from 'path';
 export class Video {
   // ============ الأساسية ============
 static async create(videoData) {
-  const { user_id, video_url, thumbnail, description, is_public = true, path, subspace_video_id = null, subspace_thumbnail_id = null } = videoData;
+  const {
+    user_id,
+    video_url,
+    thumbnail,
+    description,
+    is_public = true,
+    path,
+    subspace_video_id = null,
+    subspace_thumbnail_id = null
+  } = videoData;
+
+  // نضمن أن كلا الحقلين path و video_url لا يأتيان فارغين
+  const finalPath = path || video_url;
+  if (!finalPath) throw new Error('path or video_url is required');
+
   const [result] = await pool.execute(
-    `INSERT INTO videos (user_id, video_url, thumbnail, description, is_public, path, subspace_video_id, subspace_thumbnail_id)
+    `INSERT INTO videos
+       (user_id, video_url, thumbnail, description, is_public, path,
+        subspace_video_id, subspace_thumbnail_id)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [user_id, video_url, thumbnail || '/default-thumbnail.jpg', description || null, is_public, path || video_url, subspace_video_id, subspace_thumbnail_id]
+    [
+      user_id,
+      video_url,
+      thumbnail || '/default-thumbnail.jpg',
+      description || null,
+      is_public,
+      finalPath,               // ✅ مضمون غير-null
+      subspace_video_id,
+      subspace_thumbnail_id
+    ]
   );
   return result.insertId;
 }
-
-  // ✅ الحصول على فيديوهات المستخدم مع الفرز
-  static async getUserVideos(userId, sortBy = 'latest') {
-    try {
-      let orderBy = 'v.created_at DESC';
-      switch (sortBy) {
-        case 'trending':
-          orderBy = 'v.views DESC, v.likes DESC, v.shares DESC';
-          break;
-        case 'oldest':
-          orderBy = 'v.created_at ASC';
-          break;
-        case 'latest':
-        default:
-          orderBy = 'v.created_at DESC';
-      }
-
-      // ✅ استخدام قيم افتراضية آمنة
-      const safeUserId = userId || 0;
-
-      const [rows] = await pool.execute(
-        `SELECT v.*, u.username, u.avatar,
-                COUNT(DISTINCT l.user_id) as likes,
-                EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-         FROM videos v
-         JOIN users u ON v.user_id = u.id
-         LEFT JOIN likes l ON v.id = l.video_id
-         WHERE v.user_id = ? AND v.deleted_by_admin = FALSE
-         GROUP BY v.id
-         ORDER BY ${orderBy}`,
-        [safeUserId, safeUserId]
-      );
-
-      return rows;
-    } catch (error) {
-      console.error('Error in Video.getUserVideos:', error);
-      return [];
-    }
-  }
 
   // ✅ تسجيل مشاركة الفيديو
   static async addShare(videoId, userId) {
@@ -141,7 +127,7 @@ static async create(videoData) {
       LIMIT ${safeLimit} OFFSET ${safeOffset}
     `;
 
-    const [rows] = await pool.execute(query, [safeUserId]);
+    const [rows] = await pool.execute(query, [safeUserId, safeLimit, safeOffset]);
 
     console.log(`✅ Found ${rows.length} videos`);
     return rows;
