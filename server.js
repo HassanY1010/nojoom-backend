@@ -284,15 +284,16 @@ app.get('/api/user/watch-history', authenticateToken, async (req, res) => {
         descriptionColumn = 'video_description';
       }
 
-      const [history] = await pool.execute(
-  `SELECT wh.*, v.id as video_id, v.url, u.username as owner_username
+   const [history] = await pool.execute(
+  `SELECT 
+     wh.*, v.id as video_id, v.url, u.username as owner_username
    FROM watch_history wh
    JOIN videos v ON wh.video_id = v.id
    JOIN users u ON v.user_id = u.id
    WHERE wh.user_id = ?
    ORDER BY wh.updated_at DESC
    LIMIT ? OFFSET ?`,
-  [userId, limit, offset]
+  [userId, parseInt(limit), parseInt(offset)]   // 3 عناصر = 3 ?
 );
 
       const [totalCount] = await pool.execute(
