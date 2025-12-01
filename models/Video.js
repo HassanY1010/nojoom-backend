@@ -606,7 +606,7 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
   }
 
   // ============ الفيديوهات الشائعة ============
-  static async getMostViewedVideos(limit = 10) {
+static async getMostViewedVideos(limit = 10) {
   const safeLimit = parseInt(limit) || 10;
 
   const [rows] = await pool.execute(
@@ -616,7 +616,7 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
      WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
      ORDER BY COALESCE(v.views, 0) DESC 
      LIMIT ?`,
-    [safeLimit]          // 1 معامل = 1 ؟
+    [safeLimit]   // دائمًا معامل واحد لـ LIMIT ?
   );
   return rows;
 }
