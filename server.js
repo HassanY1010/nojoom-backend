@@ -123,29 +123,22 @@ app.use('/api/videos/upload', (req, res, next) => {
 // ======================================================
 // 4-B. Auto-fix video & thumbnail URLs for ALL /api/videos routes
 // ======================================================
-import { getSignedVideoUrl } from './utils/supabaseHelpers.js';
-
-app.use('/api/videos', async (req, res, next) => {
+app.use('/api/videos', (req, res, next) => {
   const originalJson = res.json;
-
-  res.json = async function (body) {
+  res.json = function (body) {
     if (body?.videos?.length) {
-      for (let v of body.videos) {
-        if (v.path) {
-          const fileName = v.path.split('/').pop();
-          v.video_url = await getSignedVideoUrl(fileName);
-        }
-
-        if (v.thumbnail) {
-          const thumbFile = v.thumbnail.split('/').pop();
-          v.thumbnail = await getSignedVideoUrl(thumbFile);
-        }
-      }
+      body.videos = body.videos.map(v => ({
+        ...v,
+        video_url: v.video_url?.startsWith('http')
+          ? v.video_url
+          : `https://ulcaeqbffsegiibgllrh.supabase.co/storage/v1/object/public/videos${v.video_url}`,
+        thumbnail: v.thumbnail?.startsWith('http')
+          ? v.thumbnail
+          : `https://ulcaeqbffsegiibgllrh.supabase.co/storage/v1/object/public/videos${v.thumbnail}`
+      }));
     }
-
     return originalJson.call(this, body);
   };
-
   next();
 });
 
