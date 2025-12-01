@@ -131,10 +131,10 @@ app.use('/api/videos', (req, res, next) => {
         ...v,
         video_url: v.video_url?.startsWith('http')
           ? v.video_url
-          : `https://ulcaeqbffsegiibgllrh.supabase.co/storage/v1/object/public/videos${v.video_url}`,
+          : `https://ulcaeqbffsegiibgllrh.supabase.co/storage/v1/object/public/videos/${v.video_url}`,
         thumbnail: v.thumbnail?.startsWith('http')
           ? v.thumbnail
-          : `https://ulcaeqbffsegiibgllrh.supabase.co/storage/v1/object/public/videos${v.thumbnail}`
+          : `https://ulcaeqbffsegiibgllrh.supabase.co/storage/v1/object/public/videos/${v.thumbnail}`
       }));
     }
     return originalJson.call(this, body);
@@ -606,13 +606,15 @@ app.post('/api/cors-test', (req, res) => {
 
 // Static files info endpoint
 app.get('/api/static-info', (req, res) => {
+  const SUPABASE_URL = 'https://ulcaeqbffsegiibgllrh.supabase.co/storage/v1/object/public';
+
   res.json({
     staticFiles: {
-      avatars: '${import.meta.env.VITE_API_URL}/uploads/avatars/',
-      videos: '${import.meta.env.VITE_API_URL}/uploads/videos/',
-      thumbnails: '${import.meta.env.VITE_API_URL}/thumbnails/',
-      defaultAvatar: '${import.meta.env.VITE_API_URL}/default-avatar.png',
-      defaultThumbnail: '${import.meta.env.VITE_API_URL}/default-thumbnail.jpg'
+      avatars: `${SUPABASE_URL}/avatars/`,
+      videos: `${SUPABASE_URL}/videos/`,
+      thumbnails: `${SUPABASE_URL}/videos/`, // داخل نفس bucket videos
+      defaultAvatar: `${SUPABASE_URL}/avatars/default-avatar.png`,
+      defaultThumbnail: `${SUPABASE_URL}/videos/default-thumbnail.jpg`
     },
     uploadsDirectory: path.join(__dirname, 'uploads'),
     thumbnailsDirectory: path.join(__dirname, 'thumbnails'),
