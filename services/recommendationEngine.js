@@ -232,188 +232,183 @@ class RecommendationEngine {
     }
   }
 
-// recommendationEngine.js أو Video.js
-async getFollowingVideos(userId, followingIds, limit = 10) {
-  // 1️⃣ التأكد من أن userId صحيح
-  const parsedUserId = parseInt(userId);
-  if (!parsedUserId) return [];
-
-  // 2️⃣ تنظيف قائمة المتابعين
-  const cleanIds = Array.isArray(followingIds)
-    ? followingIds.map(id => parseInt(id)).filter(id => Number.isInteger(id) && id > 0)
-    : [];
-
-  if (cleanIds.length === 0) return [];
-
-  // 3️⃣ توليد placeholders
-  const placeholders = cleanIds.map(() => '?').join(',');
-
-  // 4️⃣ الاستعلام
-  const sql = `
-    SELECT v.*, u.username, u.avatar,
-           COUNT(DISTINCT l.user_id) AS likes,
-           EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) AS is_liked
-    FROM videos v
-    JOIN users u ON v.user_id = u.id
-    LEFT JOIN likes l ON v.id = l.video_id
-    WHERE v.user_id IN (${placeholders})
-      AND v.deleted_by_admin = FALSE
-      AND u.is_banned = FALSE
-    GROUP BY v.id
-    ORDER BY v.created_at DESC
-    LIMIT ?`;
-
-  // 5️⃣ إعداد الباراميترات
-  const params = [parsedUserId, ...cleanIds, parseInt(limit)];
-
-  console.log(`🔍 getFollowingVideos → ${params.length} params`, params);
-
-  try {
-    const [rows] = await pool.execute(sql, params);
-
-    // 6️⃣ توليد روابط الفيديو و thumbnails كاملة من Supabase
-    const videosWithUrls = rows.map(video => ({
-      ...video,
-      video_url: `${process.env.SUPABASE_URL}/storage/v1/object/public/videos/${video.path}`,
-      thumbnail_url: video.thumbnail 
-        ? `${process.env.SUPABASE_URL}/storage/v1/object/public/avatars/${video.thumbnail}`
-        : '/default-thumbnail.jpg'
-    }));
-
-    return videosWithUrls;
-
-  } catch (err) {
-    console.error('❌ getFollowingVideos error:', err);
-    return [];
-  }
-}
-
-
-async getPopularVideos(userId, limit) {
-  const safeUserId = parseInt(userId) || 0;
-  const safeLimit  = parseInt(limit)  || 10;
-
-  const sql = `
-    SELECT v.*, u.username, u.avatar,
-           COUNT(DISTINCT l.user_id) AS likes,
-           EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) AS is_liked
-    FROM videos v
-    JOIN users u ON v.user_id = u.id
-    LEFT JOIN likes l ON v.id = l.video_id
-    WHERE v.deleted_by_admin = FALSE
-      AND u.is_banned = FALSE
-    GROUP BY v.id
-    ORDER BY v.views DESC, v.created_at DESC
-    LIMIT ?`;
-
-  console.log(`🔍 getPopularVideos → user:${safeUserId}  limit:${safeLimit}`);
-
-  try {
-    const [rows] = await pool.execute(sql, [safeUserId, safeLimit]);
-    return rows;
-  } catch (err) {
-    console.error('❌ getPopularVideos error:', err);
-    return [];
-  }
-}
-
-async getRecommendedVideos(userId, limit = 10) {
-  try {
-    const safeUserId = parseInt(userId) || 0;
-    const safeLimit = parseInt(limit) || 10;
-
-    console.log(`🎯 Generating recommendations for user: ${safeUserId}`);
-
-    // الحصول على قائمة المتابعين
-    const [following] = await pool.execute(
-      'SELECT following_id FROM followers WHERE follower_id = ?',
-      [safeUserId]
-    );
-    const followingIds = following.map(f => f.following_id).filter(id => id != null);
-
-    // تحديد الأقسام المختلفة بناءً على حالة المستخدم
-    let followingLimit = 0;
-    let interestLimit = 0;
-    let popularLimit = 0;
-
-    if (followingIds.length > 0) {
-      // إذا كان المستخدم يتابع أشخاص
-      followingLimit = Math.floor(safeLimit * 0.4);
-      interestLimit = Math.floor(safeLimit * 0.4);
-      popularLimit = Math.floor(safeLimit * 0.2);
-    } else {
-      // إذا لم يكن يتابع أحداً
-      followingLimit = 0;
-      interestLimit = Math.floor(safeLimit * 0.5);
-      popularLimit = Math.floor(safeLimit * 0.5);
-    }
-
-    const followingVideos = await this.getFollowingVideos(safeUserId, followingIds, followingLimit);
-    
-    let interestBasedVideos = [];
+  async getFollowingVideos(userId, followingIds, limit = 10) {
     try {
-      const userInterests = await this.analyzeUserInterests(safeUserId);
-      interestBasedVideos = await this.getInterestBasedVideos(safeUserId, userInterests, interestLimit);
-    } catch (interestError) {
-      console.warn('⚠️ Could not get interest-based videos, using popular instead:', interestError.message);
+      // 1️⃣ التأكد من أن userId صحيح
+      const parsedUserId = parseInt(userId);
+      if (!parsedUserId) return [];
+
+      // 2️⃣ تنظيف قائمة المتابعين
+      const cleanIds = Array.isArray(followingIds)
+        ? followingIds.map(id => parseInt(id)).filter(id => Number.isInteger(id) && id > 0)
+        : [];
+
+      if (cleanIds.length === 0) return [];
+
+      // 3️⃣ توليد placeholders بشكل آمن
+      const placeholders = cleanIds.map(() => '?').join(',');
+
+      // 4️⃣ الاستعلام
+      const sql = `
+        SELECT v.*, u.username, u.avatar,
+               COUNT(DISTINCT l.user_id) AS likes,
+               EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) AS is_liked
+        FROM videos v
+        JOIN users u ON v.user_id = u.id
+        LEFT JOIN likes l ON v.id = l.video_id
+        WHERE v.user_id IN (${placeholders})
+          AND v.deleted_by_admin = FALSE
+          AND u.is_banned = FALSE
+        GROUP BY v.id
+        ORDER BY v.created_at DESC
+        LIMIT ?`;
+
+      // 5️⃣ إعداد الباراميترات
+      const params = [parsedUserId, ...cleanIds, parseInt(limit)];
+
+      console.log(`🔍 getFollowingVideos → ${params.length} params`, params);
+
+      const [rows] = await pool.execute(sql, params);
+
+      // 6️⃣ توليد روابط الفيديو و thumbnails كاملة من Supabase
+      const videosWithUrls = rows.map(video => ({
+        ...video,
+        video_url: `${process.env.SUPABASE_URL}/storage/v1/object/public/videos/${video.path}`,
+        thumbnail_url: video.thumbnail 
+          ? `${process.env.SUPABASE_URL}/storage/v1/object/public/avatars/${video.thumbnail}`
+          : '/default-thumbnail.jpg'
+      }));
+
+      return videosWithUrls;
+
+    } catch (err) {
+      console.error('❌ getFollowingVideos error:', err);
+      return [];
     }
-    
-    const popularVideos = await this.getPopularVideos(safeUserId, popularLimit);
-
-    const allVideos = [...followingVideos, ...interestBasedVideos, ...popularVideos];
-    const uniqueVideos = this.removeDuplicates(allVideos);
-
-    console.log(`✅ Generated ${uniqueVideos.length} recommendations for user: ${safeUserId}`);
-    return uniqueVideos.slice(0, safeLimit);
-
-  } catch (error) {
-    console.error('❌ Error getting recommended videos:', error);
-    // Fallback to popular videos only
-    return await this.getPopularVideos(parseInt(userId) || 0, parseInt(limit) || 10);
   }
-}
+
+  async getPopularVideos(userId, limit) {
+    try {
+      const safeUserId = parseInt(userId) || 0;
+      const safeLimit  = parseInt(limit)  || 10;
+
+      const sql = `
+        SELECT v.*, u.username, u.avatar,
+               COUNT(DISTINCT l.user_id) AS likes,
+               EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) AS is_liked
+        FROM videos v
+        JOIN users u ON v.user_id = u.id
+        LEFT JOIN likes l ON v.id = l.video_id
+        WHERE v.deleted_by_admin = FALSE
+          AND u.is_banned = FALSE
+        GROUP BY v.id
+        ORDER BY v.views DESC, v.created_at DESC
+        LIMIT ?`;
+
+      console.log(`🔍 getPopularVideos → user:${safeUserId}  limit:${safeLimit}`);
+
+      const [rows] = await pool.execute(sql, [safeUserId, safeLimit]);
+      return rows;
+    } catch (err) {
+      console.error('❌ getPopularVideos error:', err);
+      return [];
+    }
+  }
+
+  async getRecommendedVideos(userId, limit = 10) {
+    try {
+      const safeUserId = parseInt(userId) || 0;
+      const safeLimit = parseInt(limit) || 10;
+
+      console.log(`🎯 Generating recommendations for user: ${safeUserId}`);
+
+      // الحصول على قائمة المتابعين
+      const [following] = await pool.execute(
+        'SELECT following_id FROM followers WHERE follower_id = ?',
+        [safeUserId]
+      );
+      const followingIds = following.map(f => f.following_id).filter(id => id != null);
+
+      // تحديد الأقسام المختلفة بناءً على حالة المستخدم
+      let followingLimit = 0;
+      let interestLimit = 0;
+      let popularLimit = 0;
+
+      if (followingIds.length > 0) {
+        // إذا كان المستخدم يتابع أشخاص
+        followingLimit = Math.floor(safeLimit * 0.4);
+        interestLimit = Math.floor(safeLimit * 0.4);
+        popularLimit = Math.floor(safeLimit * 0.2);
+      } else {
+        // إذا لم يكن يتابع أحداً
+        followingLimit = 0;
+        interestLimit = Math.floor(safeLimit * 0.5);
+        popularLimit = Math.floor(safeLimit * 0.5);
+      }
+
+      const followingVideos = await this.getFollowingVideos(safeUserId, followingIds, followingLimit);
+      
+      let interestBasedVideos = [];
+      try {
+        const userInterests = await this.analyzeUserInterests(safeUserId);
+        interestBasedVideos = await this.getInterestBasedVideos(safeUserId, userInterests, interestLimit);
+      } catch (interestError) {
+        console.warn('⚠️ Could not get interest-based videos, using popular instead:', interestError.message);
+      }
+      
+      const popularVideos = await this.getPopularVideos(safeUserId, popularLimit);
+
+      const allVideos = [...followingVideos, ...interestBasedVideos, ...popularVideos];
+      const uniqueVideos = this.removeDuplicates(allVideos);
+
+      console.log(`✅ Generated ${uniqueVideos.length} recommendations for user: ${safeUserId}`);
+      return uniqueVideos.slice(0, safeLimit);
+
+    } catch (error) {
+      console.error('❌ Error getting recommended videos:', error);
+      // Fallback to popular videos only
+      return await this.getPopularVideos(parseInt(userId) || 0, parseInt(limit) || 10);
+    }
+  }
 
   /**
    * الحصول على فيديوهات بناءً على الاهتمامات
    */
   async getInterestBasedVideos(userId, interests, limit) {
-  try {
-    const topTags = Object.entries(interests.tags)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([tag]) => tag);
+    try {
+      const topTags = Object.entries(interests.tags)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([tag]) => tag);
 
-    if (!topTags || topTags.length === 0) return [];
+      if (!topTags || topTags.length === 0) return [];
 
-    const searchTerms = topTags.map(t => `%${t}%`);
-    const placeholders = searchTerms.map(() => 'v.description LIKE ?').join(' OR ');
+      const searchTerms = topTags.map(t => `%${t}%`);
+      const placeholders = searchTerms.map(() => 'v.description LIKE ?').join(' OR ');
 
-    const params = [userId, ...searchTerms, parseInt(limit)];
-    const sql = `
-      SELECT v.*, u.username, u.avatar,
-             COUNT(DISTINCT l.user_id) as likes,
-             EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-      FROM videos v
-      JOIN users u ON v.user_id = u.id
-      LEFT JOIN likes l ON v.id = l.video_id
-      WHERE (${placeholders})
-        AND v.deleted_by_admin = FALSE 
-        AND u.is_banned = FALSE
-      GROUP BY v.id
-      ORDER BY v.views DESC, v.created_at DESC
-      LIMIT ?`;
+      const params = [userId, ...searchTerms, parseInt(limit)];
+      const sql = `
+        SELECT v.*, u.username, u.avatar,
+               COUNT(DISTINCT l.user_id) as likes,
+               EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+        FROM videos v
+        JOIN users u ON v.user_id = u.id
+        LEFT JOIN likes l ON v.id = l.video_id
+        WHERE (${placeholders})
+          AND v.deleted_by_admin = FALSE 
+          AND u.is_banned = FALSE
+        GROUP BY v.id
+        ORDER BY v.views DESC, v.created_at DESC
+        LIMIT ?`;
 
-    const [videos] = await pool.execute(sql, params);
-    return videos;
-  } catch (error) {
-    console.error('Error getting interest-based videos:', error);
-    return [];
+      const [videos] = await pool.execute(sql, params);
+      return videos;
+    } catch (error) {
+      console.error('Error getting interest-based videos:', error);
+      return [];
+    }
   }
-}
-  /**
-   * الحصول على الفيديوهات الشائعة
-   */
-    
+
   /**
    * إزالة الفيديوهات المكررة
    */
