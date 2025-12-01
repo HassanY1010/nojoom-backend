@@ -101,39 +101,33 @@ static async create(videoData) {
     return rows[0];
   }
 
-  static async getVideos(limit = 10, offset = 0, userId = 0) {
+ static async getVideos(limit = 10, offset = 0, userId = 0) {
   try {
-    // ✅ استخدام قيم افتراضية آمنة
     const safeUserId = parseInt(userId) || 0;
-    const safeLimit = parseInt(limit) || 10;
-    const safeOffset = parseInt(offset) || 0;
+    const safeLimit  = Math.max(1, parseInt(limit)  || 10);
+    const safeOffset = Math.max(0, parseInt(offset) || 0);
 
-    console.log('🔍 Executing getVideos query with params:', {
-      userId: safeUserId,
-      limit: safeLimit,
-      offset: safeOffset
-    });
+    console.log('🔍 Video.getVideos →', { userId: safeUserId, limit: safeLimit, offset: safeOffset });
 
-    // MySQL لا يقبل placeholders مباشرة للـ LIMIT/OFFSET في بعض الحالات
-    const query = `
+    const sql = `
       SELECT v.*, u.username, u.avatar,
-             COUNT(DISTINCT l.user_id) as likes,
-             EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+             COUNT(DISTINCT l.user_id) AS likes,
+             EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) AS is_liked
       FROM videos v
       JOIN users u ON v.user_id = u.id
       LEFT JOIN likes l ON v.id = l.video_id
-      WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
+      WHERE v.deleted_by_admin = FALSE
+        AND u.is_banned = FALSE
       GROUP BY v.id
       ORDER BY v.created_at DESC
-      LIMIT ${safeLimit} OFFSET ${safeOffset}
-    `;
+      LIMIT ? OFFSET ?`;
 
-    const [rows] = await pool.execute(query, [safeUserId, safeLimit, safeOffset]);
+    const [rows] = await pool.execute(sql, [safeUserId, safeLimit, safeOffset]);
 
-    console.log(`✅ Found ${rows.length} videos`);
+    console.log(`✅ Video.getVideos → ${rows.length} videos`);
     return rows;
-  } catch (error) {
-    console.error('❌ Error in Video.getVideos:', error);
+  } catch (err) {
+    console.error('❌ Video.getVideos error:', err);
     return [];
   }
 }
