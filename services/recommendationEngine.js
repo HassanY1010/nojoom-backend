@@ -277,8 +277,8 @@ class RecommendationEngine {
   /**
    * الحصول على فيديوهات المتابَعين
    */
-  async getFollowingVideos(userId, followingIds, limit) {
-    if (!followingIds.length) return [];
+    async getFollowingVideos(userId, followingIds, limit) {
+    if (!followingIds || !Array.isArray(followingIds) || followingIds.length === 0) return [];
 
     const placeholders = followingIds.map(() => '?').join(',');
     const sql = `
@@ -293,9 +293,8 @@ class RecommendationEngine {
         AND u.is_banned = FALSE
       GROUP BY v.id
       ORDER BY v.created_at DESC
-      LIMIT ?
-    `;
-    // عدد المعاملات = 1 + followingIds.length + 1
+      LIMIT ?`;
+
     const params = [userId, ...followingIds, parseInt(limit)];
     const [videos] = await pool.execute(sql, params);
     return videos;
@@ -305,44 +304,43 @@ class RecommendationEngine {
    * الحصول على فيديوهات بناءً على الاهتمامات
    */
   async getInterestBasedVideos(userId, interests, limit) {
-    try {
-      const topTags = Object.entries(interests.tags)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([tag]) => tag);
+  try {
+    const topTags = Object.entries(interests.tags)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([tag]) => tag);
 
-      if (topTags.length === 0) return [];
+    if (!topTags || topTags.length === 0) return [];
 
-      const searchTerms = topTags.map(t => `%${t}%`);
-      const placeholders = searchTerms.map(() => 'v.description LIKE ?').join(' OR ');
+    const searchTerms = topTags.map(t => `%${t}%`);
+    const placeholders = searchTerms.map(() => 'v.description LIKE ?').join(' OR ');
 
-      const params = [userId, ...searchTerms, parseInt(limit)]; // 1 + n + 1
-      const [videos] = await pool.execute(
-        `SELECT v.*, u.username, u.avatar,
-                COUNT(DISTINCT l.user_id) as likes,
-                EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-         FROM videos v
-         JOIN users u ON v.user_id = u.id
-         LEFT JOIN likes l ON v.id = l.video_id
-         WHERE (${placeholders})
-           AND v.deleted_by_admin = FALSE 
-           AND u.is_banned = FALSE
-         GROUP BY v.id
-         ORDER BY v.views DESC, v.created_at DESC
-         LIMIT ?`,
-        params
-      );
-      return videos;
-    } catch (error) {
-      console.error('Error getting interest-based videos:', error);
-      return [];
-    }
+    const params = [userId, ...searchTerms, parseInt(limit)];
+    const sql = `
+      SELECT v.*, u.username, u.avatar,
+             COUNT(DISTINCT l.user_id) as likes,
+             EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+      FROM videos v
+      JOIN users u ON v.user_id = u.id
+      LEFT JOIN likes l ON v.id = l.video_id
+      WHERE (${placeholders})
+        AND v.deleted_by_admin = FALSE 
+        AND u.is_banned = FALSE
+      GROUP BY v.id
+      ORDER BY v.views DESC, v.created_at DESC
+      LIMIT ?`;
+
+    const [videos] = await pool.execute(sql, params);
+    return videos;
+  } catch (error) {
+    console.error('Error getting interest-based videos:', error);
+    return [];
   }
-
+}
   /**
    * الحصول على الفيديوهات الشائعة
    */
-  async getPopularVideos(userId, limit) {
+    async getPopularVideos(userId, limit) {
     const [videos] = await pool.execute(
       `SELECT v.*, u.username, u.avatar,
               COUNT(DISTINCT l.user_id) as likes,
@@ -355,7 +353,7 @@ class RecommendationEngine {
        GROUP BY v.id
        ORDER BY v.views DESC, v.created_at DESC
        LIMIT ?`,
-      [userId, parseInt(limit)]    // 2 معامل = 2 ؟
+      [userId, parseInt(limit)]    // دائمًا معاملين لـ 2 علامات استفهام
     );
     return videos;
   }
