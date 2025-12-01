@@ -300,101 +300,100 @@ export const videoController = {
  async getRecommendedVideos(req, res) {
   try {
     const userId = parseInt(req.user?.id) || 0;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit  = Math.max(1, parseInt(req.query.limit) || 10);
 
-    console.log(`🔄 Getting recommended videos for user: ${userId}`);
+    console.log(`🔄 getRecommendedVideos → user:${userId}  limit:${limit}`);
 
     let recommendedVideos = [];
 
+    // 1. محاولة المحرك الذكي أولاً
     try {
       const { recommendationEngine } = await import('../services/recommendationEngine.js');
       recommendedVideos = await recommendationEngine.getRecommendedVideos(userId, limit);
-      console.log(`✅ Recommendation engine returned ${recommendedVideos.length} videos`);
-    } catch (recError) {
-      console.error('Recommendation engine failed, using fallback:', recError.message);
-      
-      // Fallback 1: محاولة الحصول على فيديوهات المتابعين
-      let followingVideos = [];
-      try {
-        followingVideos = await Video.getVideosFromFollowingUsers(userId, Math.floor(limit * 0.6));
-      } catch (error) {
-        console.warn('⚠️ Could not get following videos:', error.message);
-      }
-      
-      // Fallback 2: محاولة الحصول على الفيديوهات الشهيرة
-      let popularVideos = [];
-      try {
-        popularVideos = await Video.getMostViewedVideos(Math.floor(limit * 0.4));
-      } catch (error) {
-        console.warn('⚠️ Could not get popular videos:', error.message);
-      }
-      
+      console.log(`✅ Engine returned ${recommendedVideos.length} videos`);
+    } catch (recErr) {
+      console.warn('⚠️ Engine failed:', recErr.message);
+    }
+
+    // 2. Fallback يدوي إذا لزم الأمر
+    if (!recommendedVideos?.length) {
+      console.log('⚠️ Using manual fallback');
+
+      const [followingVideos, popularVideos] = await Promise.allSettled([
+        Video.getVideosFromFollowingUsers
+          ? Video.getVideosFromFollowingUsers(userId, Math.floor(limit * 0.6))
+          : Promise.resolve([]),
+
+        Video.getMostViewedVideos
+          ? Video.getMostViewedVideos(Math.floor(limit * 0.4))
+          : Promise.resolve([])
+      ]).then(results =>
+        results.map(r => (r.status === 'fulfilled' ? r.value : []))
+      );
+
       recommendedVideos = [...followingVideos, ...popularVideos];
     }
 
-    // إذا لم نحصل على أي فيديوهات، استخدم getVideos كحل أخير
-    if (!recommendedVideos || recommendedVideos.length === 0) {
-      console.log('⚠️ No recommended videos, using general videos');
-      recommendedVideos = await Video.getVideos(limit, 0);
+    // 3. آخر ورقة: فيديوهات عامة
+    if (!recommendedVideos.length) {
+      console.log('⚠️ Using general videos');
+      recommendedVideos = await Video.getVideos(limit, 0, userId);
     }
 
-    // إزالة التكرارات
-    const uniqueVideos = this.removeDuplicates(recommendedVideos);
+    // 4. إزالة التكرار + معالجة الحقول
+    const uniqueMap = new Map();
+    for (const v of recommendedVideos) {
+      if (!uniqueMap.has(v.id)) uniqueMap.set(v.id, v);
+    }
+    const uniqueVideos = Array.from(uniqueMap.values());
 
-    // إضافة عدد التعليقات والصورة المصغرة الافتراضية
-    for (let video of uniqueVideos) {
+    for (const v of uniqueVideos) {
       try {
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
+        const [[{ count }]] = await pool.execute(
+          'SELECT COUNT(*) AS count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
+          [v.id]
         );
-        video.comment_count = commentCount[0]?.count || 0;
-        
-        if (!video.thumbnail || video.thumbnail === 'null' || video.thumbnail === 'undefined') {
-          video.thumbnail = '/default-thumbnail.jpg';
+        v.comment_count = parseInt(count) || 0;
+
+        v.likes  = parseInt(v.likes)  || 0;
+        v.views  = parseInt(v.views)  || 0;
+        v.user_id= parseInt(v.user_id)|| 0;
+
+        if (!v.thumbnail || v.thumbnail === 'null' || v.thumbnail === 'undefined') {
+          v.thumbnail = '/default-thumbnail.jpg';
         }
-        
-        // تأكد من أن جميع الحقول الرقمية هي أرقام
-        video.likes = parseInt(video.likes) || 0;
-        video.views = parseInt(video.views) || 0;
-        video.user_id = parseInt(video.user_id) || 0;
-        
-      } catch (error) {
-        console.warn(`⚠️ Error processing video ${video.id}:`, error.message);
-        video.comment_count = 0;
-        video.thumbnail = '/default-thumbnail.jpg';
+      } catch (e) {
+        console.warn(`⚠️ Failed to enrich video ${v.id}:`, e.message);
+        v.comment_count = 0;
+        v.thumbnail     = '/default-thumbnail.jpg';
       }
     }
 
-    res.json({ 
-      videos: uniqueVideos.slice(0, limit), 
-      message: uniqueVideos.length > 0 ? 'Recommended videos' : 'Popular videos'
+    return res.json({
+      videos: uniqueVideos.slice(0, limit),
+      message: uniqueVideos.length ? 'Recommended videos' : 'Popular videos'
     });
-
-  } catch (error) {
-    console.error('❌ Get recommended videos error:', error);
+  } catch (overallErr) {
+    console.error('❌ getRecommendedVideos crashed:', overallErr);
 
     // Fallback نهائي
     try {
-      const videos = await Video.getVideos(10, 0);
-      
-      for (let video of videos) {
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
+      const videos = await Video.getVideos(10, 0, req.user?.id || 0);
+      for (const v of videos) {
+        const [[{ count }]] = await pool.execute(
+          'SELECT COUNT(*) AS count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
+          [v.id]
         );
-        video.comment_count = commentCount[0]?.count || 0;
-        if (!video.thumbnail) video.thumbnail = '/default-thumbnail.jpg';
+        v.comment_count = parseInt(count) || 0;
+        if (!v.thumbnail) v.thumbnail = '/default-thumbnail.jpg';
       }
-      
-      res.json({ videos, message: 'Popular videos' });
-    } catch (fallbackError) {
-      console.error('❌ Ultimate fallback failed:', fallbackError);
-      res.status(500).json({ error: 'Failed to load videos', videos: [] });
+      return res.json({ videos, message: 'Popular videos' });
+    } catch (fbErr) {
+      console.error('❌ Ultimate fallback failed:', fbErr);
+      return res.status(500).json({ error: 'Failed to load videos', videos: [] });
     }
   }
-}
-,
+},
   async getFollowingVideos(req, res) {
   try {
     const userId = parseInt(req.user?.id) || 0;
