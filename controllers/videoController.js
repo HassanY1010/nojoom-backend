@@ -16,6 +16,8 @@ const supabase = createClient(
 );
 
 export const videoController = {
+
+  
   // ==================== دوال المشاركة الجديدة ====================
 
   // ✅ تسجيل مشاركة الفيديو
@@ -988,8 +990,7 @@ async getManifest(req, res) {
     });
   }
 },
-   * الحصول على chunk محدد
-   */
+
   async getChunk(req, res) {
     try {
       const { videoId, quality, index } = req.params;
