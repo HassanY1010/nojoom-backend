@@ -4,42 +4,43 @@ import path from 'path';
 
 export class Video {
   // ============ الأساسية ============
-static async create(videoData) {
-  const {
-    user_id,
-    video_url,
-    thumbnail,
-    description,
-    is_public = true,
-    path,
-    subspace_video_id = null,
-    subspace_thumbnail_id = null,
-    title = 'بدون عنوان' // ✅ أضف هذا
-  } = videoData;
-
-  const finalPath = path || video_url;
-  if (!finalPath) throw new Error('path or video_url is required');
-
-  const [result] = await pool.execute(
-    `INSERT INTO videos
-       (user_id, video_url, thumbnail, description, is_public, path,
-        subspace_video_id, subspace_thumbnail_id, url, title)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
+  static async create(videoData) {
+    const {
       user_id,
       video_url,
-      thumbnail || '/default-thumbnail.jpg',
-      description || null,
-      is_public,
-      finalPath,
-      subspace_video_id,
-      subspace_thumbnail_id,
-      video_url || '',
-      title || 'بدون عنوان' // ✅ تأكد من وجود عنوان
-    ]
-  );
-  return result.insertId;
-}
+      thumbnail,
+      description,
+      is_public = true,
+      path,
+      subspace_video_id = null,
+      subspace_thumbnail_id = null,
+      title = 'بدون عنوان' // ✅ أضف هذا
+    } = videoData;
+
+    const finalPath = path || video_url;
+    if (!finalPath) throw new Error('path or video_url is required');
+
+    const [result] = await pool.execute(
+      `INSERT INTO videos
+         (user_id, video_url, thumbnail, description, is_public, path,
+          subspace_video_id, subspace_thumbnail_id, url, title)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        user_id,
+        video_url,
+        thumbnail || '/default-thumbnail.jpg',
+        description || null,
+        is_public,
+        finalPath,
+        subspace_video_id,
+        subspace_thumbnail_id,
+        video_url || '',
+        title || 'بدون عنوان' // ✅ تأكد من وجود عنوان
+      ]
+    );
+    return result.insertId;
+  }
+
   // ✅ تسجيل مشاركة الفيديو
   static async addShare(videoId, userId) {
     try {
@@ -101,108 +102,113 @@ static async create(videoData) {
     return rows[0];
   }
 
- static async getVideos(limit = 10, offset = 0, userId = 0) {
-  try {
-    const safeUserId = parseInt(userId) || 0;
-    const safeLimit  = Math.max(1, parseInt(limit)  || 10);
-    const safeOffset = Math.max(0, parseInt(offset) || 0);
+  static async getVideos(limit = 10, offset = 0, userId = 0) {
+    try {
+      const safeUserId = parseInt(userId) || 0;
+      const safeLimit = Math.max(1, parseInt(limit) || 10);
+      const safeOffset = Math.max(0, parseInt(offset) || 0);
 
-    console.log('🔍 Video.getVideos →', { userId: safeUserId, limit: safeLimit, offset: safeOffset });
+      console.log('🔍 Video.getVideos →', { 
+        userId: safeUserId, 
+        limit: safeLimit, 
+        offset: safeOffset 
+      });
 
-    const sql = `
-      SELECT v.*, u.username, u.avatar,
-             COUNT(DISTINCT l.user_id) AS likes,
-             EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) AS is_liked
-      FROM videos v
-      JOIN users u ON v.user_id = u.id
-      LEFT JOIN likes l ON v.id = l.video_id
-      WHERE v.deleted_by_admin = FALSE
-        AND u.is_banned = FALSE
-      GROUP BY v.id
-      ORDER BY v.created_at DESC
-      LIMIT ? OFFSET ?`;
+      const sql = `
+        SELECT v.*, u.username, u.avatar,
+               COUNT(DISTINCT l.user_id) AS likes,
+               EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) AS is_liked
+        FROM videos v
+        JOIN users u ON v.user_id = u.id
+        LEFT JOIN likes l ON v.id = l.video_id
+        WHERE v.deleted_by_admin = FALSE
+          AND u.is_banned = FALSE
+        GROUP BY v.id
+        ORDER BY v.created_at DESC
+        LIMIT ? OFFSET ?`;
 
-    const [rows] = await pool.execute(sql, [safeUserId, safeLimit, safeOffset]);
+      const params = [safeUserId, safeLimit, safeOffset];
+      console.log('🔍 Video.getVideos params:', params);
 
-    console.log(`✅ Video.getVideos → ${rows.length} videos`);
-    return rows;
-  } catch (err) {
-    console.error('❌ Video.getVideos error:', err);
-    return [];
+      const [rows] = await pool.execute(sql, params);
+
+      console.log(`✅ Video.getVideos → ${rows.length} videos`);
+      return rows;
+    } catch (err) {
+      console.error('❌ Video.getVideos error:', err);
+      return [];
+    }
   }
-}
 
   // ============ نظام التوصية المتقدم ============
- 
-static async getVideosByPreferences(userId, preferences, limit = 10) {
-  try {
-    let { preferred_categories = [], excluded_users = [] } = preferences;
+  static async getVideosByPreferences(userId, preferences, limit = 10) {
+    try {
+      let { preferred_categories = [], excluded_users = [] } = preferences;
 
-    // 🔥 تنظيف المصفوفات لمنع الأخطاء
-    const cleanExcludedUsers = (Array.isArray(excluded_users) ? excluded_users : [])
-      .filter(id => id !== null && id !== undefined && !isNaN(id))
-      .map(id => parseInt(id));
+      // 🔥 تنظيف المصفوفات لمنع الأخطاء
+      const cleanExcludedUsers = (Array.isArray(excluded_users) ? excluded_users : [])
+        .filter(id => id !== null && id !== undefined && !isNaN(id))
+        .map(id => parseInt(id));
 
-    const cleanPreferredCategories = (Array.isArray(preferred_categories) ? preferred_categories : [])
-      .filter(cat => typeof cat === 'string' && cat.trim() !== '');
+      const cleanPreferredCategories = (Array.isArray(preferred_categories) ? preferred_categories : [])
+        .filter(cat => typeof cat === 'string' && cat.trim() !== '');
 
-    // قيم آمنة
-    const safeUserId = parseInt(userId) || 0;
-    const safeLimit = parseInt(limit) || 10;
+      // قيم آمنة
+      const safeUserId = parseInt(userId) || 0;
+      const safeLimit = parseInt(limit) || 10;
 
-    let query = `
-      SELECT v.*, u.username, u.avatar,
-             COUNT(DISTINCT l.user_id) as likes,
-             EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked,
-             (SELECT COUNT(*) FROM watch_history WHERE user_id = ? AND video_id = v.id) as watch_count
-      FROM videos v
-      JOIN users u ON v.user_id = u.id
-      LEFT JOIN likes l ON v.id = l.video_id
-      WHERE v.deleted_by_admin = FALSE 
-        AND u.is_banned = FALSE
-    `;
+      let query = `
+        SELECT v.*, u.username, u.avatar,
+               COUNT(DISTINCT l.user_id) as likes,
+               EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked,
+               (SELECT COUNT(*) FROM watch_history WHERE user_id = ? AND video_id = v.id) as watch_count
+        FROM videos v
+        JOIN users u ON v.user_id = u.id
+        LEFT JOIN likes l ON v.id = l.video_id
+        WHERE v.deleted_by_admin = FALSE 
+          AND u.is_banned = FALSE
+      `;
 
-    const params = [safeUserId, safeUserId];
+      const params = [safeUserId, safeUserId];
 
-    // 🔥 معالجة excluded_users الآمنة
-    if (cleanExcludedUsers.length > 0) {
-      query += ` AND v.user_id NOT IN (${cleanExcludedUsers.map(() => '?').join(',')})`;
-      params.push(...cleanExcludedUsers);
+      // 🔥 معالجة excluded_users الآمنة
+      if (cleanExcludedUsers.length > 0) {
+        query += ` AND v.user_id NOT IN (${cleanExcludedUsers.map(() => '?').join(',')})`;
+        params.push(...cleanExcludedUsers);
+      }
+
+      // 🔥 معالجة preferred_categories الآمنة
+      if (cleanPreferredCategories.length > 0) {
+        query += ' AND (';
+        cleanPreferredCategories.forEach((cat, index) => {
+          if (index > 0) query += ' OR ';
+          query += 'v.description LIKE ?';
+          params.push(`%${cat}%`);
+        });
+        query += ')';
+      }
+
+      query += `
+        GROUP BY v.id
+        ORDER BY 
+          (SELECT COALESCE(SUM(weight), 0) FROM user_interactions WHERE user_id = ? AND video_id = v.id) DESC,
+          v.views DESC,
+          v.created_at DESC
+        LIMIT ?
+      `;
+
+      params.push(safeUserId, safeLimit);
+
+      console.log('Executing getVideosByPreferences with params:', params);
+
+      const [rows] = await pool.execute(query, params);
+      return rows;
+
+    } catch (error) {
+      console.error('Error in Video.getVideosByPreferences:', error);
+      return [];
     }
-
-    // 🔥 معالجة preferred_categories الآمنة
-    if (cleanPreferredCategories.length > 0) {
-      query += ' AND (';
-      cleanPreferredCategories.forEach((cat, index) => {
-        if (index > 0) query += ' OR ';
-        query += 'v.description LIKE ?';
-        params.push(`%${cat}%`);
-      });
-      query += ')';
-    }
-
-    query += `
-      GROUP BY v.id
-      ORDER BY 
-        (SELECT COALESCE(SUM(weight), 0) FROM user_interactions WHERE user_id = ? AND video_id = v.id) DESC,
-        v.views DESC,
-        v.created_at DESC
-      LIMIT ?
-    `;
-
-    params.push(safeUserId, safeLimit);
-
-    console.log('Executing getVideosByPreferences with params:', params);
-
-    const [rows] = await pool.execute(query, params);
-    return rows;
-
-  } catch (error) {
-    console.error('Error in Video.getVideosByPreferences:', error);
-    return [];
   }
-}
-
 
   static async getSimilarVideos(videoId, userId = null, limit = 10) {
     try {
@@ -214,6 +220,17 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
       // ✅ استخدام قيم افتراضية آمنة
       const safeUserId = userId || 0;
       const safeLimit = parseInt(limit) || 10;
+
+      const params = [
+        safeUserId, 
+        firstWord,
+        videoId, 
+        firstWord,
+        currentVideo.user_id, 
+        safeLimit
+      ];
+      
+      console.log('🔍 Video.getSimilarVideos params:', params);
 
       const [rows] = await pool.execute(
         `SELECT v.*, u.username, u.avatar,
@@ -233,14 +250,7 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
          GROUP BY v.id
          ORDER BY similarity_score DESC, v.views DESC
          LIMIT ?`,
-        [
-          safeUserId, 
-          firstWord,
-          videoId, 
-          firstWord,
-          currentVideo.user_id, 
-          safeLimit
-        ]
+        params
       );
       
       return rows;
@@ -346,54 +356,53 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
   }
 
   static async deleteVideoAdmin(videoId, reason = '') {
-  try {
-    // جلب بيانات الفيديو
-    const [videos] = await pool.execute('SELECT * FROM videos WHERE id = ?', [videoId]);
-    if (videos.length === 0) {
-      throw new Error('Video not found');
-    }
-
-    const video = videos[0];
-
-    // حذف ملفات Subspace أولاً
-    if (video.subspace_video_id) {
-      await subspaceClient.deleteFile(video.subspace_video_id);
-    }
-    if (video.subspace_thumbnail_id) {
-      await subspaceClient.deleteFile(video.subspace_thumbnail_id);
-    }
-
-    // حذف الملفات المحلية القديمة
-    if (video.path) {
-      const filePath = path.join(process.cwd(), 'uploads', path.basename(video.path));
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+    try {
+      // جلب بيانات الفيديو
+      const [videos] = await pool.execute('SELECT * FROM videos WHERE id = ?', [videoId]);
+      if (videos.length === 0) {
+        throw new Error('Video not found');
       }
-    }
 
-    if (video.thumbnail && !video.thumbnail.includes('default-thumbnail')) {
-      const thumbPath = path.join(process.cwd(), 'thumbnails', path.basename(video.thumbnail));
-      if (fs.existsSync(thumbPath)) {
-        fs.unlinkSync(thumbPath);
+      const video = videos[0];
+
+      // حذف ملفات Subspace أولاً
+      if (video.subspace_video_id) {
+        await subspaceClient.deleteFile(video.subspace_video_id);
       }
+      if (video.subspace_thumbnail_id) {
+        await subspaceClient.deleteFile(video.subspace_thumbnail_id);
+      }
+
+      // حذف الملفات المحلية القديمة
+      if (video.path) {
+        const filePath = path.join(process.cwd(), 'uploads', path.basename(video.path));
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      }
+
+      if (video.thumbnail && !video.thumbnail.includes('default-thumbnail')) {
+        const thumbPath = path.join(process.cwd(), 'thumbnails', path.basename(video.thumbnail));
+        if (fs.existsSync(thumbPath)) {
+          fs.unlinkSync(thumbPath);
+        }
+      }
+
+      // تحديث حالة الحذف في جدول الفيديو
+      const [result] = await pool.execute(
+        'UPDATE videos SET deleted_by_admin = TRUE, deletion_reason = ?, deleted_at = NOW() WHERE id = ?',
+        [reason || 'Admin deletion', videoId]
+      );
+
+      // حذف أي تقارير مرتبطة
+      await pool.execute('DELETE FROM reports WHERE video_id = ?', [videoId]);
+
+      return result.affectedRows > 0;
+    } catch (error) {
+      console.error('Error in Video.deleteVideoAdmin:', error);
+      throw error;
     }
-
-    // تحديث حالة الحذف في جدول الفيديو
-    const [result] = await pool.execute(
-      'UPDATE videos SET deleted_by_admin = TRUE, deletion_reason = ?, deleted_at = NOW() WHERE id = ?',
-      [reason || 'Admin deletion', videoId]
-    );
-
-    // حذف أي تقارير مرتبطة
-    await pool.execute('DELETE FROM reports WHERE video_id = ?', [videoId]);
-
-    return result.affectedRows > 0;
-  } catch (error) {
-    console.error('Error in Video.deleteVideoAdmin:', error);
-    throw error;
   }
-}
-
 
   // ============ المستخدم ============
   static async getUserVideo(userId) {
@@ -414,6 +423,9 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
     const safeLimit = parseInt(limit) || 10;
     const safeOffset = parseInt(offset) || 0;
 
+    const params = [userId, safeLimit, safeOffset];
+    console.log('🔍 Video.getVideosByUser params:', params);
+
     const [rows] = await pool.execute(
       `SELECT v.*, u.username, u.avatar 
        FROM videos v 
@@ -421,7 +433,7 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
        WHERE v.user_id = ? AND v.deleted_by_admin = FALSE 
        ORDER BY v.created_at DESC 
        LIMIT ? OFFSET ?`,
-      [userId, safeLimit, safeOffset]
+      params
     );
     return rows;
   }
@@ -497,6 +509,9 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
     // ✅ استخدام قيم افتراضية آمنة
     const safeUserId = userId || 0;
 
+    const params = [safeUserId, id];
+    console.log('🔍 Video.getVideoWithLikes params:', params);
+
     const [rows] = await pool.execute(
       `SELECT v.*, u.username, u.avatar, 
               COUNT(DISTINCT l.user_id) as likes,
@@ -506,7 +521,7 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
        LEFT JOIN likes l ON v.id = l.video_id
        WHERE v.id = ? AND v.deleted_by_admin = FALSE AND u.is_banned = FALSE
        GROUP BY v.id`,
-      [safeUserId, id]
+      params
     );
     return rows[0];
   }
@@ -520,6 +535,9 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
   }
 
   static async getUserLikedVideos(userId) {
+    const params = [userId];
+    console.log('🔍 Video.getUserLikedVideos params:', params);
+
     const [rows] = await pool.execute(
       `SELECT v.*, u.username, u.avatar,
               COUNT(DISTINCT l2.user_id) as likes,
@@ -531,7 +549,7 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
        WHERE l.user_id = ? AND v.deleted_by_admin = FALSE AND u.is_banned = FALSE
        GROUP BY v.id
        ORDER BY l.created_at DESC`,
-      [userId]
+      params
     );
     return rows;
   }
@@ -575,11 +593,13 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
   }
 
   // ============ الفيديوهات الشائعة ============
-
   static async getTrendingVideos(limit = 10, days = 7) {
     // ✅ استخدام قيم افتراضية آمنة
     const safeLimit = parseInt(limit) || 10;
     const safeDays = parseInt(days) || 7;
+
+    const params = [safeDays, safeLimit];
+    console.log('🔍 Video.getTrendingVideos params:', params);
 
     const [rows] = await pool.execute(
       `SELECT v.*, u.username, u.avatar,
@@ -594,7 +614,7 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
        GROUP BY v.id
        ORDER BY engagement_rate DESC, likes DESC
        LIMIT ?`,
-      [safeDays, safeLimit]
+      params
     );
     return rows;
   }
@@ -622,13 +642,16 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
 
   static async recordUserInteraction(userId, videoId, interactionType, weight = 1) {
     try {
+      const params = [userId, videoId, interactionType, weight];
+      console.log('🔍 Video.recordUserInteraction params:', params);
+
       await pool.execute(
         `INSERT INTO user_interactions (user_id, video_id, interaction_type, weight, created_at)
          VALUES (?, ?, ?, ?, NOW())
          ON DUPLICATE KEY UPDATE
          weight = weight + VALUES(weight),
          updated_at = NOW()`,
-        [userId, videoId, interactionType, weight]
+        params
       );
       return true;
     } catch (error) {
@@ -638,91 +661,79 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
   }
 
   static async getVideosFromFollowingUsers(userId, limit = 10) {
-  try {
-    const safeUserId = parseInt(userId) || 0;
-    const safeLimit = parseInt(limit) || 10;
+    try {
+      const safeUserId = parseInt(userId) || 0;
+      const safeLimit = parseInt(limit) || 10;
 
-    console.log(`🔍 Executing getVideosFromFollowingUsers for user ${safeUserId}, limit ${safeLimit}`);
+      console.log(`🔍 Executing getVideosFromFollowingUsers for user ${safeUserId}, limit ${safeLimit}`);
 
-    const [rows] = await pool.execute(
-      `SELECT v.*, u.username, u.avatar,
-              COUNT(DISTINCT l.user_id) as likes,
-              EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-       FROM videos v
-       JOIN users u ON v.user_id = u.id
-       JOIN followers f ON v.user_id = f.following_id
-       LEFT JOIN likes l ON v.id = l.video_id
-       WHERE f.follower_id = ? 
-         AND v.deleted_by_admin = FALSE 
-         AND u.is_banned = FALSE
-       GROUP BY v.id
-       ORDER BY v.created_at DESC
-       LIMIT ?`,
-      [safeUserId, safeUserId, safeLimit]
-    );
-    return rows;
-  } catch (error) {
-    console.error('❌ Error in Video.getVideosFromFollowingUsers:', error);
-    return [];
+      const params = [safeUserId, safeUserId, safeLimit];
+      console.log('🔍 Video.getVideosFromFollowingUsers params:', params);
+
+      const [rows] = await pool.execute(
+        `SELECT v.*, u.username, u.avatar,
+                COUNT(DISTINCT l.user_id) as likes,
+                EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+         FROM videos v
+         JOIN users u ON v.user_id = u.id
+         JOIN followers f ON v.user_id = f.following_id
+         LEFT JOIN likes l ON v.id = l.video_id
+         WHERE f.follower_id = ? 
+           AND v.deleted_by_admin = FALSE 
+           AND u.is_banned = FALSE
+         GROUP BY v.id
+         ORDER BY v.created_at DESC
+         LIMIT ?`,
+        params
+      );
+      return rows;
+    } catch (error) {
+      console.error('❌ Error in Video.getVideosFromFollowingUsers:', error);
+      return [];
+    }
   }
-}
 
-static async getMostViewedVideos(limit = 10) {
-  const safeLimit = parseInt(limit) || 10;
+  static async getMostViewedVideos(limit = 10) {
+    try {
+      const safeLimit = parseInt(limit) || 10;
 
-  console.log(`🔍 Executing getMostViewedVideos with limit ${safeLimit}`);
+      console.log(`🔍 Executing getMostViewedVideos with limit ${safeLimit}`);
 
-  try {
-    const [rows] = await pool.execute(
-      `SELECT v.*, u.username, u.avatar 
-       FROM videos v 
-       JOIN users u ON v.user_id = u.id 
-       WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
-       ORDER BY COALESCE(v.views, 0) DESC 
-       LIMIT ?`,
-      [safeLimit]
-    );
-    return rows;
-  } catch (error) {
-    console.error('❌ Error in getMostViewedVideos:', error);
-    return [];
+      const params = [safeLimit];
+      console.log('🔍 Video.getMostViewedVideos params:', params);
+
+      const [rows] = await pool.execute(
+        `SELECT v.*, u.username, u.avatar 
+         FROM videos v 
+         JOIN users u ON v.user_id = u.id 
+         WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
+         ORDER BY COALESCE(v.views, 0) DESC 
+         LIMIT ?`,
+        params
+      );
+      return rows;
+    } catch (error) {
+      console.error('❌ Error in getMostViewedVideos:', error);
+      return [];
+    }
   }
-}
 
-// أضف هذه الدالة للمساعدة في getVideos
-static async getVideos(limit = 10, offset = 0) {
-  const safeLimit = parseInt(limit) || 10;
-  const safeOffset = parseInt(offset) || 0;
-
-  console.log(`🔍 Executing getVideos query with params: { limit: ${safeLimit}, offset: ${safeOffset} }`);
-
-  try {
-    const [rows] = await pool.execute(
-      `SELECT v.*, u.username, u.avatar,
-              COUNT(DISTINCT l.user_id) as likes,
-              EXISTS(SELECT 1 FROM likes WHERE user_id = 0 AND video_id = v.id) as is_liked
-       FROM videos v
-       JOIN users u ON v.user_id = u.id
-       LEFT JOIN likes l ON v.id = l.video_id
-       WHERE v.deleted_by_admin = FALSE 
-         AND u.is_banned = FALSE
-       GROUP BY v.id
-       ORDER BY v.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [safeLimit, safeOffset]
-    );
-    console.log(`✅ Found ${rows.length} videos`);
-    return rows;
-  } catch (error) {
-    console.error('❌ Error in Video.getVideos:', error);
-    return [];
-  }
-}
   static async searchVideos(query, userId = null, limit = 20) {
     try {
       // ✅ استخدام قيم افتراضية آمنة
       const safeUserId = userId || 0;
       const safeLimit = parseInt(limit) || 20;
+
+      const params = [
+        safeUserId,
+        `%${query}%`,
+        `%${query}%`,
+        `%${query}%`,
+        `%${query}%`,
+        safeLimit
+      ];
+      
+      console.log('🔍 Video.searchVideos params:', params);
 
       const [rows] = await pool.execute(
         `SELECT v.*, u.username, u.avatar,
@@ -743,14 +754,7 @@ static async getVideos(limit = 10, offset = 0) {
            END) DESC,
            COALESCE(v.views, 0) DESC
          LIMIT ?`,
-        [
-          safeUserId,
-          `%${query}%`,
-          `%${query}%`,
-          `%${query}%`,
-          `%${query}%`,
-          safeLimit
-        ]
+        params
       );
       return rows;
     } catch (error) {
@@ -765,6 +769,9 @@ static async getVideos(limit = 10, offset = 0) {
       // ✅ استخدام قيم افتراضية آمنة
       const safeLimit = parseInt(limit) || 50;
 
+      const params = [userId, safeLimit];
+      console.log('🔍 Video.getUserWatchHistory params:', params);
+
       const [rows] = await pool.execute(
         `SELECT wh.*, v.*, u.username as video_username 
          FROM watch_history wh
@@ -773,7 +780,7 @@ static async getVideos(limit = 10, offset = 0) {
          WHERE wh.user_id = ? AND v.deleted_by_admin = FALSE
          ORDER BY wh.updated_at DESC
          LIMIT ?`,
-        [userId, safeLimit]
+        params
       );
       return rows;
     } catch (error) {
@@ -786,6 +793,9 @@ static async getVideos(limit = 10, offset = 0) {
     try {
       // ✅ استخدام قيم افتراضية آمنة
       const safeLimit = parseInt(limit) || 10;
+
+      const params = [0, `%${category}%`, safeLimit];
+      console.log('🔍 Video.getPopularVideosByCategory params:', params);
 
       const [rows] = await pool.execute(
         `SELECT v.*, u.username, u.avatar,
@@ -800,7 +810,7 @@ static async getVideos(limit = 10, offset = 0) {
          GROUP BY v.id
          ORDER BY COALESCE(v.views, 0) DESC
          LIMIT ?`,
-        [0, `%${category}%`, safeLimit]
+        params
       );
       return rows;
     } catch (error) {
@@ -813,6 +823,9 @@ static async getVideos(limit = 10, offset = 0) {
     try {
       // ✅ استخدام قيم افتراضية آمنة
       const safeLimit = parseInt(limit) || 10;
+
+      const params = [userId, userId, safeLimit];
+      console.log('🔍 Video.getRecentlyInteractedVideos params:', params);
 
       const [rows] = await pool.execute(
         `SELECT v.*, u.username, u.avatar,
@@ -829,7 +842,7 @@ static async getVideos(limit = 10, offset = 0) {
          GROUP BY v.id
          ORDER BY last_interaction DESC
          LIMIT ?`,
-        [userId, userId, safeLimit]
+        params
       );
       return rows;
     } catch (error) {
@@ -840,6 +853,9 @@ static async getVideos(limit = 10, offset = 0) {
 
   static async getVideoEngagementRate(videoId) {
     try {
+      const params = [videoId, videoId, videoId, videoId];
+      console.log('🔍 Video.getVideoEngagementRate params:', params);
+
       const [rows] = await pool.execute(
         `SELECT 
            COALESCE(v.views, 0) as views,
@@ -849,7 +865,7 @@ static async getVideos(limit = 10, offset = 0) {
            (SELECT COUNT(*) FROM user_interactions WHERE video_id = ?) as interactions
          FROM videos v
          WHERE v.id = ?`,
-        [videoId, videoId, videoId, videoId]
+        params
       );
       
       const data = rows[0];
@@ -870,6 +886,9 @@ static async getVideos(limit = 10, offset = 0) {
       // ✅ استخدام قيم افتراضية آمنة
       const safeLimit = parseInt(limit) || 10;
 
+      const params = [safeLimit];
+      console.log('🔍 Video.getTopCreatorsByEngagement params:', params);
+
       const [rows] = await pool.execute(
         `SELECT u.id, u.username, u.avatar,
                 COUNT(DISTINCT v.id) as video_count,
@@ -884,7 +903,7 @@ static async getVideos(limit = 10, offset = 0) {
          GROUP BY u.id
          ORDER BY engagement_score DESC
          LIMIT ?`,
-        [safeLimit]
+        params
       );
       return rows;
     } catch (error) {
