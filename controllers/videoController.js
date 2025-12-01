@@ -320,13 +320,8 @@ export const videoController = {
       console.log('⚠️ Using manual fallback');
 
       const [followingVideos, popularVideos] = await Promise.allSettled([
-        Video.getVideosFromFollowingUsers
-          ? Video.getVideosFromFollowingUsers(userId, Math.floor(limit * 0.6))
-          : Promise.resolve([]),
-
-        Video.getMostViewedVideos
-          ? Video.getMostViewedVideos(Math.floor(limit * 0.4))
-          : Promise.resolve([])
+        Video.getVideosFromFollowingUsers(userId, Math.floor(limit * 0.6)),
+        Video.getMostViewedVideos(Math.floor(limit * 0.4))
       ]).then(results =>
         results.map(r => (r.status === 'fulfilled' ? r.value : []))
       );
