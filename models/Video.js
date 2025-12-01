@@ -139,33 +139,7 @@ static async create(videoData) {
 }
 
   // ============ نظام التوصية المتقدم ============
- static async getVideosFromFollowingUsers(userId, limit = 10) {
-  try {
-    const safeUserId = parseInt(userId) || 0;
-    const safeLimit = parseInt(limit) || 10;
-
-    const [rows] = await pool.execute(
-      `SELECT v.*, u.username, u.avatar,
-              COUNT(DISTINCT l.user_id) as likes,
-              EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-       FROM videos v
-       JOIN users u ON v.user_id = u.id
-       JOIN followers f ON v.user_id = f.following_id
-       LEFT JOIN likes l ON v.id = l.video_id
-       WHERE f.follower_id = ? 
-         AND v.deleted_by_admin = FALSE 
-         AND u.is_banned = FALSE
-       GROUP BY v.id
-       ORDER BY v.created_at DESC
-       LIMIT ?`,
-      [safeUserId, safeUserId, safeLimit]
-    );
-    return rows;
-  } catch (error) {
-    console.error('Error in Video.getVideosFromFollowingUsers:', error);
-    return [];
-  }
-}
+ 
 static async getVideosByPreferences(userId, preferences, limit = 10) {
   try {
     let { preferred_categories = [], excluded_users = [] } = preferences;
@@ -607,20 +581,7 @@ static async getVideosByPreferences(userId, preferences, limit = 10) {
   }
 
   // ============ الفيديوهات الشائعة ============
-static async getMostViewedVideos(limit = 10) {
-  const safeLimit = parseInt(limit) || 10;
 
-  const [rows] = await pool.execute(
-    `SELECT v.*, u.username, u.avatar 
-     FROM videos v 
-     JOIN users u ON v.user_id = u.id 
-     WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
-     ORDER BY COALESCE(v.views, 0) DESC 
-     LIMIT ?`,
-    [safeLimit]
-  );
-  return rows;
-}
   static async getTrendingVideos(limit = 10, days = 7) {
     // ✅ استخدام قيم افتراضية آمنة
     const safeLimit = parseInt(limit) || 10;
@@ -682,26 +643,87 @@ static async getMostViewedVideos(limit = 10) {
     }
   }
 
-  static async getVideoStats(videoId) {
-    try {
-      const [rows] = await pool.execute(
-        `SELECT 
-           COALESCE(v.views, 0) as views,
-           COALESCE(v.shares, 0) as shares,
-           (SELECT COUNT(*) FROM likes WHERE video_id = ?) as likes_count,
-           (SELECT COUNT(*) FROM watch_history WHERE video_id = ?) as watches_count,
-           (SELECT AVG(watch_time) FROM watch_history WHERE video_id = ?) as avg_watch_time
-         FROM videos v
-         WHERE v.id = ?`,
-        [videoId, videoId, videoId, videoId]
-      );
-      return rows[0];
-    } catch (error) {
-      console.error('Error in Video.getVideoStats:', error);
-      return null;
-    }
-  }
+  static async getVideosFromFollowingUsers(userId, limit = 10) {
+  try {
+    const safeUserId = parseInt(userId) || 0;
+    const safeLimit = parseInt(limit) || 10;
 
+    console.log(`🔍 Executing getVideosFromFollowingUsers for user ${safeUserId}, limit ${safeLimit}`);
+
+    const [rows] = await pool.execute(
+      `SELECT v.*, u.username, u.avatar,
+              COUNT(DISTINCT l.user_id) as likes,
+              EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+       FROM videos v
+       JOIN users u ON v.user_id = u.id
+       JOIN followers f ON v.user_id = f.following_id
+       LEFT JOIN likes l ON v.id = l.video_id
+       WHERE f.follower_id = ? 
+         AND v.deleted_by_admin = FALSE 
+         AND u.is_banned = FALSE
+       GROUP BY v.id
+       ORDER BY v.created_at DESC
+       LIMIT ?`,
+      [safeUserId, safeUserId, safeLimit]
+    );
+    return rows;
+  } catch (error) {
+    console.error('❌ Error in Video.getVideosFromFollowingUsers:', error);
+    return [];
+  }
+}
+
+static async getMostViewedVideos(limit = 10) {
+  const safeLimit = parseInt(limit) || 10;
+
+  console.log(`🔍 Executing getMostViewedVideos with limit ${safeLimit}`);
+
+  try {
+    const [rows] = await pool.execute(
+      `SELECT v.*, u.username, u.avatar 
+       FROM videos v 
+       JOIN users u ON v.user_id = u.id 
+       WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
+       ORDER BY COALESCE(v.views, 0) DESC 
+       LIMIT ?`,
+      [safeLimit]
+    );
+    return rows;
+  } catch (error) {
+    console.error('❌ Error in getMostViewedVideos:', error);
+    return [];
+  }
+}
+
+// أضف هذه الدالة للمساعدة في getVideos
+static async getVideos(limit = 10, offset = 0) {
+  const safeLimit = parseInt(limit) || 10;
+  const safeOffset = parseInt(offset) || 0;
+
+  console.log(`🔍 Executing getVideos query with params: { limit: ${safeLimit}, offset: ${safeOffset} }`);
+
+  try {
+    const [rows] = await pool.execute(
+      `SELECT v.*, u.username, u.avatar,
+              COUNT(DISTINCT l.user_id) as likes,
+              EXISTS(SELECT 1 FROM likes WHERE user_id = 0 AND video_id = v.id) as is_liked
+       FROM videos v
+       JOIN users u ON v.user_id = u.id
+       LEFT JOIN likes l ON v.id = l.video_id
+       WHERE v.deleted_by_admin = FALSE 
+         AND u.is_banned = FALSE
+       GROUP BY v.id
+       ORDER BY v.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [safeLimit, safeOffset]
+    );
+    console.log(`✅ Found ${rows.length} videos`);
+    return rows;
+  } catch (error) {
+    console.error('❌ Error in Video.getVideos:', error);
+    return [];
+  }
+}
   static async searchVideos(query, userId = null, limit = 20) {
     try {
       // ✅ استخدام قيم افتراضية آمنة
