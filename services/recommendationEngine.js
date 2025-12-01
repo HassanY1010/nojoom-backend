@@ -17,6 +17,47 @@ class RecommendationEngine {
     
     this.minWatchTimeForScore = 10; // 10 seconds minimum to count as engagement
     this.completionThreshold = 0.8; // 80% watched counts as completed
+    
+    // 🔹 إضافة cache لنتائج التوصيات
+    this.recommendationCache = new Map();
+    this.cacheTimeout = 5 * 60 * 1000; // 5 دقائق cache
+  }
+
+  // 🔹 دالة مساعدة للتحقق من صلاحية الـ cache
+  getCachedRecommendations(userId) {
+    const cacheKey = `rec_${userId}`;
+    const cached = this.recommendationCache.get(cacheKey);
+    
+    if (cached && (Date.now() - cached.timestamp) < this.cacheTimeout) {
+      console.log(`🎯 Using cached recommendations for user ${userId}`);
+      return cached.data;
+    }
+    
+    return null;
+  }
+
+  // 🔹 دالة لحفظ التوصيات في الـ cache
+  setCachedRecommendations(userId, recommendations) {
+    const cacheKey = `rec_${userId}`;
+    this.recommendationCache.set(cacheKey, {
+      data: recommendations,
+      timestamp: Date.now()
+    });
+    
+    // 🔹 تنظيف الـ cache القديم تلقائياً
+    setTimeout(() => {
+      this.cleanupCache();
+    }, this.cacheTimeout);
+  }
+
+  // 🔹 تنظيف الـ cache
+  cleanupCache() {
+    const now = Date.now();
+    for (const [key, value] of this.recommendationCache.entries()) {
+      if (now - value.timestamp > this.cacheTimeout) {
+        this.recommendationCache.delete(key);
+      }
+    }
   }
 
   /**
@@ -322,6 +363,15 @@ async getPopularVideos(userId, limit) {
 
     console.log(`🔍 getPopularVideos → user:${safeUserId}  limit:${safeLimit}`);
 
+    // 🔹 التحقق من الـ cache
+    const cacheKey = `popular_${safeLimit}`;
+    const cached = this.recommendationCache.get(cacheKey);
+    
+    if (cached && (Date.now() - cached.timestamp) < (2 * 60 * 1000)) { // 2 دقائق cache للفيديوهات الشعبية
+      console.log(`✅ Using cached popular videos (${cached.data.length})`);
+      return cached.data;
+    }
+
     // التحقق من أن لدينا اتصال pool
     if (!pool || typeof pool.query !== 'function') {
       console.error('❌ Pool is not available or query method not found');
@@ -346,6 +396,13 @@ async getPopularVideos(userId, limit) {
 
     const [rows] = await pool.query(sql);
     console.log(`✅ getPopularVideos found ${rows.length} videos`);
+    
+    // 🔹 حفظ في الـ cache
+    this.recommendationCache.set(cacheKey, {
+      data: rows,
+      timestamp: Date.now()
+    });
+
     return rows;
   } catch (err) {
     console.error('❌ getPopularVideos error:', err);
@@ -357,12 +414,20 @@ async getPopularVideos(userId, limit) {
     return [];
   }
 }
+
   async getRecommendedVideos(userId, limit = 10) {
     try {
       const safeUserId = parseInt(userId) || 0;
       const safeLimit = parseInt(limit) || 10;
 
       console.log(`🎯 Generating recommendations for user: ${safeUserId}`);
+
+      // 🔹 التحقق من الـ cache أولاً
+      const cached = this.getCachedRecommendations(safeUserId);
+      if (cached && cached.length >= safeLimit) {
+        console.log(`✅ Returning ${cached.length} cached recommendations`);
+        return cached.slice(0, safeLimit);
+      }
 
       // الحصول على قائمة المتابعين
       const [following] = await pool.execute(
@@ -402,9 +467,13 @@ async getPopularVideos(userId, limit) {
 
       const allVideos = [...followingVideos, ...interestBasedVideos, ...popularVideos];
       const uniqueVideos = this.removeDuplicates(allVideos);
+      const finalRecommendations = uniqueVideos.slice(0, safeLimit);
 
-      console.log(`✅ Generated ${uniqueVideos.length} recommendations for user: ${safeUserId}`);
-      return uniqueVideos.slice(0, safeLimit);
+      // 🔹 حفظ في الـ cache
+      this.setCachedRecommendations(safeUserId, finalRecommendations);
+
+      console.log(`✅ Generated ${finalRecommendations.length} recommendations for user: ${safeUserId}`);
+      return finalRecommendations;
 
     } catch (error) {
       console.error('❌ Error getting recommended videos:', error);
