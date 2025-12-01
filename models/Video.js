@@ -13,33 +13,33 @@ static async create(videoData) {
     is_public = true,
     path,
     subspace_video_id = null,
-    subspace_thumbnail_id = null
+    subspace_thumbnail_id = null,
+    title = 'بدون عنوان' // ✅ أضف هذا
   } = videoData;
 
-  // نضمن أن كلا الحقلين path و video_url لا يأتيان فارغين
   const finalPath = path || video_url;
   if (!finalPath) throw new Error('path or video_url is required');
 
   const [result] = await pool.execute(
     `INSERT INTO videos
        (user_id, video_url, thumbnail, description, is_public, path,
-        subspace_video_id, subspace_thumbnail_id, url)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        subspace_video_id, subspace_thumbnail_id, url, title)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       user_id,
       video_url,
       thumbnail || '/default-thumbnail.jpg',
       description || null,
       is_public,
-      finalPath,               // ✅ مضمون غير-null
+      finalPath,
       subspace_video_id,
       subspace_thumbnail_id,
-      video_url || ''          // ✅ أضفنا url لتجنب خطأ default value
+      video_url || '',
+      title || 'بدون عنوان' // ✅ تأكد من وجود عنوان
     ]
   );
   return result.insertId;
 }
-
   // ✅ تسجيل مشاركة الفيديو
   static async addShare(videoId, userId) {
     try {
