@@ -233,71 +233,71 @@ class RecommendationEngine {
   }
 
 async getFollowingVideos(userId, followingIds, limit) {
-  if (!followingIds || !Array.isArray(followingIds) || followingIds.length === 0) {
-    return [];
-  }
+  if (!Array.isArray(followingIds) || followingIds.length === 0) return [];
 
-  // فلترة أي قيم غير صالحة
-  const filteredFollowingIds = followingIds.filter(id => id != null && !isNaN(parseInt(id)));
-  if (filteredFollowingIds.length === 0) return [];
+  // تنقية الأيدي
+  const cleanIds = followingIds
+    .map(id => parseInt(id))
+    .filter(id => Number.isInteger(id) && id > 0);
 
-  const placeholders = filteredFollowingIds.map(() => '?').join(',');
+  if (cleanIds.length === 0) return [];
+
+  const placeholders = cleanIds.map(() => '?').join(',');
   const sql = `
     SELECT v.*, u.username, u.avatar,
-           COUNT(DISTINCT l.user_id) as likes,
-           EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
+           COUNT(DISTINCT l.user_id) AS likes,
+           EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) AS is_liked
     FROM videos v
     JOIN users u ON v.user_id = u.id
     LEFT JOIN likes l ON v.id = l.video_id
     WHERE v.user_id IN (${placeholders})
-      AND v.deleted_by_admin = FALSE 
+      AND v.deleted_by_admin = FALSE
       AND u.is_banned = FALSE
     GROUP BY v.id
     ORDER BY v.created_at DESC
     LIMIT ?`;
 
-  // تحويل جميع القيم إلى أرقام للتأكد من النوع الصحيح
   const params = [
     parseInt(userId) || 0,
-    ...filteredFollowingIds.map(id => parseInt(id)),
+    ...cleanIds,
     parseInt(limit) || 10
   ];
 
-  console.log(`🔍 Executing getFollowingVideos query with ${params.length} params:`, params);
-  
+  console.log(`🔍 getFollowingVideos → ${params.length} params`, params);
+
   try {
-    const [videos] = await pool.execute(sql, params);
-    return videos;
-  } catch (error) {
-    console.error('❌ Error in getFollowingVideos:', error);
+    const [rows] = await pool.execute(sql, params);
+    return rows;
+  } catch (err) {
+    console.error('❌ getFollowingVideos error:', err);
     return [];
   }
 }
 
 async getPopularVideos(userId, limit) {
   const safeUserId = parseInt(userId) || 0;
-  const safeLimit = parseInt(limit) || 10;
+  const safeLimit  = parseInt(limit)  || 10;
 
-  console.log(`🔍 Executing getPopularVideos query for user ${safeUserId}, limit ${safeLimit}`);
+  const sql = `
+    SELECT v.*, u.username, u.avatar,
+           COUNT(DISTINCT l.user_id) AS likes,
+           EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) AS is_liked
+    FROM videos v
+    JOIN users u ON v.user_id = u.id
+    LEFT JOIN likes l ON v.id = l.video_id
+    WHERE v.deleted_by_admin = FALSE
+      AND u.is_banned = FALSE
+    GROUP BY v.id
+    ORDER BY v.views DESC, v.created_at DESC
+    LIMIT ?`;
+
+  console.log(`🔍 getPopularVideos → user:${safeUserId}  limit:${safeLimit}`);
 
   try {
-    const [videos] = await pool.execute(
-      `SELECT v.*, u.username, u.avatar,
-              COUNT(DISTINCT l.user_id) as likes,
-              EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) as is_liked
-       FROM videos v
-       JOIN users u ON v.user_id = u.id
-       LEFT JOIN likes l ON v.id = l.video_id
-       WHERE v.deleted_by_admin = FALSE 
-         AND u.is_banned = FALSE
-       GROUP BY v.id
-       ORDER BY v.views DESC, v.created_at DESC
-       LIMIT ?`,
-      [safeUserId, safeLimit]
-    );
-    return videos;
-  } catch (error) {
-    console.error('❌ Error in getPopularVideos:', error);
+    const [rows] = await pool.execute(sql, [safeUserId, safeLimit]);
+    return rows;
+  } catch (err) {
+    console.error('❌ getPopularVideos error:', err);
     return [];
   }
 }
