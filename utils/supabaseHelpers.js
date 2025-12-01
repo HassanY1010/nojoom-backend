@@ -1,4 +1,4 @@
-import { supabase } from '../config/supabase.js';
+import { supabase } from '../config/supabaseConfig.js';
 
 export const getSignedVideoUrl = async (fileName) => {
   if (!fileName) return null;
