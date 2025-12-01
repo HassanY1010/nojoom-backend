@@ -16,7 +16,6 @@ import { initializeDatabase, pool } from './config/db.js';
 // Import routes
 import authRoutes from './routes/authRoutes.js';
 import videoRoutes from './routes/videoRoutes.js';
-import { getSignedVideoUrl } from './utils/supabaseHelpers.js';
 import chatRoutes from './routes/chatRoutes.js';
 import tokenRoutes from './routes/tokenRoutes.js';
 import { authenticateToken } from './middleware/authMiddleware.js';
