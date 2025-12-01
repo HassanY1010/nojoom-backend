@@ -232,17 +232,23 @@ class RecommendationEngine {
     }
   }
 
-async getFollowingVideos(userId, followingIds, limit) {
-  if (!Array.isArray(followingIds) || followingIds.length === 0) return [];
+// recommendationEngine.js أو Video.js
+async getFollowingVideos(userId, followingIds, limit = 10) {
+  // 1️⃣ التأكد من أن userId صحيح
+  const parsedUserId = parseInt(userId);
+  if (!parsedUserId) return [];
 
-  // تنقية الأيدي
-  const cleanIds = followingIds
-    .map(id => parseInt(id))
-    .filter(id => Number.isInteger(id) && id > 0);
+  // 2️⃣ تنظيف قائمة المتابعين
+  const cleanIds = Array.isArray(followingIds)
+    ? followingIds.map(id => parseInt(id)).filter(id => Number.isInteger(id) && id > 0)
+    : [];
 
   if (cleanIds.length === 0) return [];
 
+  // 3️⃣ توليد placeholders
   const placeholders = cleanIds.map(() => '?').join(',');
+
+  // 4️⃣ الاستعلام
   const sql = `
     SELECT v.*, u.username, u.avatar,
            COUNT(DISTINCT l.user_id) AS likes,
@@ -257,22 +263,31 @@ async getFollowingVideos(userId, followingIds, limit) {
     ORDER BY v.created_at DESC
     LIMIT ?`;
 
-  const params = [
-    parseInt(userId) || 0,
-    ...cleanIds,
-    parseInt(limit) || 10
-  ];
+  // 5️⃣ إعداد الباراميترات
+  const params = [parsedUserId, ...cleanIds, parseInt(limit)];
 
   console.log(`🔍 getFollowingVideos → ${params.length} params`, params);
 
   try {
     const [rows] = await pool.execute(sql, params);
-    return rows;
+
+    // 6️⃣ توليد روابط الفيديو و thumbnails كاملة من Supabase
+    const videosWithUrls = rows.map(video => ({
+      ...video,
+      video_url: `${process.env.SUPABASE_URL}/storage/v1/object/public/videos/${video.path}`,
+      thumbnail_url: video.thumbnail 
+        ? `${process.env.SUPABASE_URL}/storage/v1/object/public/avatars/${video.thumbnail}`
+        : '/default-thumbnail.jpg'
+    }));
+
+    return videosWithUrls;
+
   } catch (err) {
     console.error('❌ getFollowingVideos error:', err);
     return [];
   }
 }
+
 
 async getPopularVideos(userId, limit) {
   const safeUserId = parseInt(userId) || 0;
