@@ -139,7 +139,7 @@ static async create(videoData) {
 }
 
   // ============ نظام التوصية المتقدم ============
-  static async getVideosFromFollowingUsers(userId, limit = 10) {
+ static async getVideosFromFollowingUsers(userId, limit = 10) {
   try {
     const safeUserId = parseInt(userId) || 0;
     const safeLimit = parseInt(limit) || 10;
@@ -158,7 +158,7 @@ static async create(videoData) {
        GROUP BY v.id
        ORDER BY v.created_at DESC
        LIMIT ?`,
-      [safeUserId, safeUserId, safeLimit] // ✅ 3 معامل = 3 ؟
+      [safeUserId, safeUserId, safeLimit]
     );
     return rows;
   } catch (error) {
@@ -617,7 +617,7 @@ static async getMostViewedVideos(limit = 10) {
      WHERE v.deleted_by_admin = FALSE AND u.is_banned = FALSE
      ORDER BY COALESCE(v.views, 0) DESC 
      LIMIT ?`,
-    [safeLimit] // ✅ 1 معامل = 1 ؟
+    [safeLimit]
   );
   return rows;
 }
