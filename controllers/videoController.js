@@ -297,200 +297,141 @@ export const videoController = {
 },
 
 
-  async getRecommendedVideos(req, res) {
+ async getRecommendedVideos(req, res) {
+  try {
+    const userId = parseInt(req.user?.id) || 0;
+    const limit = parseInt(req.query.limit) || 10;
+
+    console.log(`🔄 Getting recommended videos for user: ${userId}`);
+
     try {
-      const userId = req.user.id;
-      // ✅ استخدام قيم افتراضية آمنة
-      const limit = parseInt(req.query.limit) || 10;
+      const { recommendationEngine } = await import('../services/recommendationEngine.js');
+      const recommendedVideos = await recommendationEngine.getRecommendedVideos(userId, limit);
 
-      console.log(`🔄 Getting recommended videos for user: ${userId}`);
-
-      // استخدام محرك التوصية إذا كان موجوداً
-      try {
-        const { recommendationEngine } = await import('../services/recommendationEngine.js');
-        const recommendedVideos = await recommendationEngine.getRecommendedVideos(userId, limit);
-
-        // ✅ إضافة عدد التعليقات لكل فيديو موصى به
-        for (let video of recommendedVideos) {
-          const [commentCount] = await pool.execute(
-            'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-            [video.id]
-          );
-          video.comment_count = commentCount[0].count;
-
-          // ✅ التأكد من وجود thumbnail افتراضي
-          if (!video.thumbnail) {
-            video.thumbnail = '/default-thumbnail.jpg';
-          }
-        }
-
-        res.json({
-          videos: recommendedVideos,
-          message: 'Recommended videos based on your interests'
-        });
-      } catch (recError) {
-        console.error('Recommendation engine failed, using fallback:', recError);
-
-        // Fallback: فيديوهات المتابَعين + فيديوهات شائعة
-        const followingVideos = await Video.getVideosFromFollowingUsers(userId, Math.floor(limit * 0.6));
-        const popularVideos = await Video.getMostViewedVideos(Math.floor(limit * 0.4));
-
-        const allVideos = [...followingVideos, ...popularVideos];
-        const uniqueVideos = this.removeDuplicates(allVideos);
-
-        // ✅ إضافة عدد التعليقات لكل فيديو في الفال باك
-        for (let video of uniqueVideos) {
-          const [commentCount] = await pool.execute(
-            'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-            [video.id]
-          );
-          video.comment_count = commentCount[0].count;
-
-          // ✅ التأكد من وجود thumbnail افتراضي
-          if (!video.thumbnail) {
-            video.thumbnail = '/default-thumbnail.jpg';
-          }
-        }
-
-        res.json({
-          videos: uniqueVideos.slice(0, limit),
-          message: 'Popular videos and videos from followed users'
-        });
-      }
-    } catch (error) {
-      console.error('Get recommended videos error:', error);
-
-      // Fallback نهائي إلى الفيديوهات العادية
-      const videos = await Video.getVideos(10, 0);
-
-      // ✅ إضافة عدد التعليقات لكل فيديو في الفال باك النهائي
-      for (let video of videos) {
+      for (let video of recommendedVideos) {
         const [commentCount] = await pool.execute(
           'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
           [video.id]
         );
         video.comment_count = commentCount[0].count;
-
-        // ✅ التأكد من وجود thumbnail افتراضي
-        if (!video.thumbnail) {
-          video.thumbnail = '/default-thumbnail.jpg';
-        }
+        if (!video.thumbnail) video.thumbnail = '/default-thumbnail.jpg';
       }
 
-      res.json({
-        videos,
-        message: 'Popular videos'
-      });
+      res.json({ videos: recommendedVideos, message: 'Recommended videos based on your interests' });
+
+    } catch (recError) {
+      console.error('Recommendation engine failed, using fallback:', recError);
+
+      const followingVideos = await Video.getVideosFromFollowingUsers(userId, Math.floor(limit * 0.6));
+      const popularVideos = await Video.getMostViewedVideos(Math.floor(limit * 0.4));
+      const allVideos = [...followingVideos, ...popularVideos];
+      const uniqueVideos = this.removeDuplicates(allVideos);
+
+      for (let video of uniqueVideos) {
+        const [commentCount] = await pool.execute(
+          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
+          [video.id]
+        );
+        video.comment_count = commentCount[0].count;
+        if (!video.thumbnail) video.thumbnail = '/default-thumbnail.jpg';
+      }
+
+      res.json({ videos: uniqueVideos.slice(0, limit), message: 'Popular videos and videos from followed users' });
     }
-  },
 
-  async getFollowingVideos(req, res) {
-    try {
-      const userId = req.user.id;
-      // ✅ استخدام قيم افتراضية آمنة
-      const limit = parseInt(req.query.limit) || 10;
+  } catch (error) {
+    console.error('Get recommended videos error:', error);
 
-      console.log(`🔄 Getting following videos for user: ${userId}`);
+    const videos = await Video.getVideos(10, 0);
 
-      const videos = await Video.getVideosFromFollowingUsers(userId, limit);
-
-      // ✅ إضافة عدد التعليقات لكل فيديو للمتابَعين
-      for (let video of videos) {
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
-        );
-        video.comment_count = commentCount[0].count;
-
-        // ✅ التأكد من وجود thumbnail افتراضي
-        if (!video.thumbnail) {
-          video.thumbnail = '/default-thumbnail.jpg';
-        }
-      }
-
-      res.json({
-        videos,
-        message: 'Videos from users you follow'
-      });
-    } catch (error) {
-      console.error('Get following videos error:', error);
-
-      // Fallback إلى الفيديوهات العادية
-      const videos = await Video.getVideos(limit, 0);
-
-      // ✅ إضافة عدد التعليقات لكل فيديو في الفال باك
-      for (let video of videos) {
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
-        );
-        video.comment_count = commentCount[0].count;
-
-        // ✅ التأكد من وجود thumbnail افتراضي
-        if (!video.thumbnail) {
-          video.thumbnail = '/default-thumbnail.jpg';
-        }
-      }
-
-      res.json({
-        videos,
-        message: 'Popular videos'
-      });
-    }
-  },
-
-  async getVideo(req, res) {
-    try {
-      const { id } = req.params;
-      // ✅ استخدام قيم افتراضية آمنة
-      const userId = req.user?.id || 0;
-
-      console.log('🔍 Fetching video:', id);
-
-      const video = await Video.getVideoWithLikes(id, userId);
-
-      if (!video) {
-        return res.status(404).json({ error: 'Video not found' });
-      }
-
-      // ✅ التأكد من وجود thumbnail افتراضي
-      if (!video.thumbnail) {
-        video.thumbnail = '/default-thumbnail.jpg';
-      }
-
-      // ✅ التحقق من وجود الملف الفعلي على السيرفر
-      const videoFilename = path.basename(video.path);
-      const videoFilePath = path.join(process.cwd(), 'uploads', 'videos', videoFilename);
-
-      if (!fs.existsSync(videoFilePath)) {
-        console.log('❌ Video file missing on server:', videoFilePath);
-        return res.status(404).json({
-          error: 'Video file not found on server',
-          details: 'The video record exists but the file is missing'
-        });
-      }
-
-      // ✅ إضافة عدد التعليقات للفيديو
+    for (let video of videos) {
       const [commentCount] = await pool.execute(
         'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-        [id]
+        [video.id]
       );
       video.comment_count = commentCount[0].count;
-
-      await Video.incrementViews(id);
-
-      res.json({
-        video: {
-          ...video,
-          file_exists: true,
-          file_path: videoFilePath
-        }
-      });
-    } catch (error) {
-      console.error('Get video error:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      if (!video.thumbnail) video.thumbnail = '/default-thumbnail.jpg';
     }
-  },
+
+    res.json({ videos, message: 'Popular videos' });
+  }
+},
+  async getFollowingVideos(req, res) {
+  try {
+    const userId = parseInt(req.user?.id) || 0;
+    const limit = parseInt(req.query.limit) || 10;
+
+    console.log(`🔄 Getting following videos for user: ${userId}`);
+
+    const videos = await Video.getVideosFromFollowingUsers(userId, limit);
+
+    for (let video of videos) {
+      const [commentCount] = await pool.execute(
+        'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
+        [video.id]
+      );
+      video.comment_count = commentCount[0].count;
+      if (!video.thumbnail) video.thumbnail = '/default-thumbnail.jpg';
+    }
+
+    res.json({ videos, message: 'Videos from users you follow' });
+
+  } catch (error) {
+    console.error('Get following videos error:', error);
+
+    const videos = await Video.getVideos(limit, 0);
+
+    for (let video of videos) {
+      const [commentCount] = await pool.execute(
+        'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
+        [video.id]
+      );
+      video.comment_count = commentCount[0].count;
+      if (!video.thumbnail) video.thumbnail = '/default-thumbnail.jpg';
+    }
+
+    res.json({ videos, message: 'Popular videos' });
+  }
+}
+,
+ async getVideo(req, res) {
+  try {
+    const { id } = req.params;
+    const userId = parseInt(req.user?.id) || 0;
+
+    console.log('🔍 Fetching video:', id);
+
+    const video = await Video.getVideoWithLikes(id, userId);
+    if (!video) return res.status(404).json({ error: 'Video not found' });
+
+    if (!video.thumbnail) video.thumbnail = '/default-thumbnail.jpg';
+
+    const videoFilename = path.basename(video.path);
+    const videoFilePath = path.join(process.cwd(), 'uploads', 'videos', videoFilename);
+
+    if (!fs.existsSync(videoFilePath)) {
+      console.log('❌ Video file missing on server:', videoFilePath);
+      return res.status(404).json({
+        error: 'Video file not found on server',
+        details: 'The video record exists but the file is missing'
+      });
+    }
+
+    const [commentCount] = await pool.execute(
+      'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
+      [id]
+    );
+    video.comment_count = commentCount[0].count;
+
+    await Video.incrementViews(id);
+
+    res.json({ video: { ...video, file_exists: true, file_path: videoFilePath } });
+
+  } catch (error) {
+    console.error('Get video error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+},
 
   async getUserVideo(req, res) {
     try {
