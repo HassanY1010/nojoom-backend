@@ -16,6 +16,7 @@ import { initializeDatabase, pool } from './config/db.js';
 // Import routes
 import authRoutes from './routes/authRoutes.js';
 import videoRoutes from './routes/videoRoutes.js';
+import { getSignedVideoUrl } from './utils/supabaseHelpers.js';
 import chatRoutes from './routes/chatRoutes.js';
 import tokenRoutes from './routes/tokenRoutes.js';
 import { authenticateToken } from './middleware/authMiddleware.js';
@@ -123,22 +124,29 @@ app.use('/api/videos/upload', (req, res, next) => {
 // ======================================================
 // 4-B. Auto-fix video & thumbnail URLs for ALL /api/videos routes
 // ======================================================
-app.use('/api/videos', (req, res, next) => {
+import { getSignedVideoUrl } from './utils/supabaseHelpers.js';
+
+app.use('/api/videos', async (req, res, next) => {
   const originalJson = res.json;
-  res.json = function (body) {
+
+  res.json = async function (body) {
     if (body?.videos?.length) {
-      body.videos = body.videos.map(v => ({
-        ...v,
-        video_url: v.video_url?.startsWith('http')
-          ? v.video_url
-          : `https://ulcaeqbffsegiibgllrh.supabase.co/storage/v1/object/public/videos/${v.video_url}`,
-        thumbnail: v.thumbnail?.startsWith('http')
-          ? v.thumbnail
-          : `https://ulcaeqbffsegiibgllrh.supabase.co/storage/v1/object/public/videos/${v.thumbnail}`
-      }));
+      for (let v of body.videos) {
+        if (v.path) {
+          const fileName = v.path.split('/').pop();
+          v.video_url = await getSignedVideoUrl(fileName);
+        }
+
+        if (v.thumbnail) {
+          const thumbFile = v.thumbnail.split('/').pop();
+          v.thumbnail = await getSignedVideoUrl(thumbFile);
+        }
+      }
     }
+
     return originalJson.call(this, body);
   };
+
   next();
 });
 
