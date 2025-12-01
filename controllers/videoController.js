@@ -395,60 +395,66 @@ export const videoController = {
   }
 },
   async getFollowingVideos(req, res) {
-  try {
-    const userId = parseInt(req.user?.id) || 0;
-    const limit = parseInt(req.query.limit) || 10;
-
-    console.log(`🔄 Getting following videos for user: ${userId}`);
-
-    const videos = await Video.getVideosFromFollowingUsers(userId, limit);
-
-    // إضافة عدد التعليقات والصورة المصغرة الافتراضية
-    for (let video of videos) {
-      try {
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
-        );
-        video.comment_count = commentCount[0]?.count || 0;
-        
-        if (!video.thumbnail || video.thumbnail === 'null' || video.thumbnail === 'undefined') {
-          video.thumbnail = '/default-thumbnail.jpg';
-        }
-      } catch (error) {
-        console.warn(`⚠️ Error processing video ${video.id}:`, error.message);
-        video.comment_count = 0;
-        video.thumbnail = '/default-thumbnail.jpg';
-      }
-    }
-
-    res.json({ videos, message: 'Videos from users you follow' });
-
-  } catch (error) {
-    console.error('❌ Get following videos error:', error);
-
-    // Fallback to general videos
     try {
-      const videos = await Video.getVideos(limit, 0);
-      
-      for (let video of videos) {
-        const [commentCount] = await pool.execute(
-          'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-          [video.id]
-        );
-        video.comment_count = commentCount[0]?.count || 0;
-        if (!video.thumbnail) video.thumbnail = '/default-thumbnail.jpg';
+      const userId = parseInt(req.user?.id) || 0;
+      const limit = parseInt(req.query.limit) || 10;
+
+      console.log(`🔄 Getting following videos for user: ${userId}`);
+
+      // 1️⃣ جلب قائمة المستخدمين الذين يتابعهم المستخدم الحالي
+      const [followersRows] = await pool.execute(
+        'SELECT following_id FROM follows WHERE follower_id = ?',
+        [userId]
+      );
+      const followingIds = followersRows.map(f => f.following_id);
+
+      // 2️⃣ جلب الفيديوهات من المتابعين إذا وجدوا
+      let videos = [];
+      if (followingIds.length > 0) {
+        videos = await RecommendationEngine.getFollowingVideos(userId, followingIds, limit);
       }
-      
-      res.json({ videos, message: 'Popular videos' });
-    } catch (fallbackError) {
-      console.error('❌ Fallback failed:', fallbackError);
+
+      // 3️⃣ إذا لم يتم جلب أي فيديوهات، استخدم fallback للفيديوهات العامة
+      if (!videos || videos.length === 0) {
+        console.log('⚠️ No following videos found, using general videos fallback');
+        videos = await Video.getVideos(limit, 0);
+      }
+
+      // 4️⃣ إضافة عدد التعليقات وروابط الفيديو وthumbnail
+      for (let video of videos) {
+        try {
+          const [commentCount] = await pool.execute(
+            'SELECT COUNT(*) as count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
+            [video.id]
+          );
+          video.comment_count = commentCount[0]?.count || 0;
+
+          // روابط الفيديو وthumbnail من Supabase
+          video.video_url = `${process.env.SUPABASE_URL}/storage/v1/object/public/videos/${video.path}`;
+          video.thumbnail_url = video.thumbnail
+            ? `${process.env.SUPABASE_URL}/storage/v1/object/public/avatars/${video.thumbnail}`
+            : '/default-thumbnail.jpg';
+
+        } catch (error) {
+          console.warn(`⚠️ Error processing video ${video.id}:`, error.message);
+          video.comment_count = 0;
+          video.thumbnail_url = '/default-thumbnail.jpg';
+          video.video_url = '';
+        }
+      }
+
+      res.json({
+        videos,
+        message: followingIds.length > 0 ? 'Videos from users you follow' : 'Popular videos'
+      });
+
+    } catch (error) {
+      console.error('❌ Get following videos error:', error);
       res.status(500).json({ error: 'Failed to load videos', videos: [] });
     }
   }
-}
+
 ,
- 
 async getVideo(req, res) {
   try {
     const { id } = req.params;
