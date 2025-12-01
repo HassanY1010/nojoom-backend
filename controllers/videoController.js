@@ -931,38 +931,63 @@ async getVideos(req, res) {
   /**
    * الحصول على manifest file للفيديو (HLS)
    */
-  async getManifest(req, res) {
-    try {
-      const { videoId } = req.params;
-      const { videoChunkService } = await import('../services/videoChunkService.js');
-
-      const status = await videoChunkService.getProcessingStatus(videoId);
-
-      if (!status) {
-        return res.status(404).json({ error: 'Video manifest not found' });
+ // في videoController.js - إصلاح دالة getManifest
+async getManifest(req, res) {
+  try {
+    const { videoId } = req.params;
+    
+    // 🔹 البحث عن ملف manifest في المسارات المحتملة
+    const manifestPaths = [
+      path.join(__dirname, '..', 'uploads', 'hls', `video-${videoId}`, 'manifest.m3u8'),
+      path.join(__dirname, '..', 'uploads', 'chunks', videoId, 'manifest.m3u8'),
+      path.join(__dirname, '..', 'uploads', `${videoId}`, 'manifest.m3u8')
+    ];
+    
+    let manifestPath = null;
+    let foundPath = null;
+    
+    for (const possiblePath of manifestPaths) {
+      if (fs.existsSync(possiblePath)) {
+        manifestPath = possiblePath;
+        foundPath = possiblePath;
+        break;
       }
-
-      if (status.processing_status !== 'completed') {
-        return res.status(202).json({
-          message: 'Video is still processing',
-          status: status.processing_status
-        });
-      }
-
-      // إرجاع مسار الـ manifest
-      res.json({
-        manifestPath: status.manifest_path,
-        totalChunks: status.total_chunks,
-        status: status.processing_status
-      });
-
-    } catch (error) {
-      console.error('Get manifest error:', error);
-      res.status(500).json({ error: 'Internal server error' });
     }
-  },
+    
+    if (!manifestPath) {
+      console.log(`ℹ️ HLS manifest not found for video ${videoId}, returning MP4 fallback`);
+      return res.json({
+        manifestUrl: null,
+        processingStatus: 'not_available',
+        message: 'HLS streaming not available for this video',
+        fallbackUrl: `${process.env.SUPABASE_URL}/storage/v1/object/public/videos/${videoId}.mp4`
+      });
+    }
+    
+    // 🔹 تحويل المسار إلى URL قابل للوصول
+    const relativePath = path.relative(path.join(__dirname, '..', 'uploads'), manifestPath);
+    const manifestUrl = `${process.env.API_URL || 'http://localhost:5000'}/uploads/${relativePath}`;
+    
+    console.log(`✅ Found HLS manifest for video ${videoId}: ${manifestUrl}`);
+    
+    res.json({
+      manifestUrl,
+      processingStatus: 'completed',
+      foundAt: foundPath,
+      relativePath
+    });
 
-  /**
+  } catch (error) {
+    console.error('Get manifest error:', error);
+    // 🔹 إرجاع fallback بدلاً من error
+    res.json({
+      manifestUrl: null,
+      processingStatus: 'error',
+      error: 'HLS not available',
+      fallbackUrl: `${process.env.SUPABASE_URL}/storage/v1/object/public/videos/${videoId}.mp4`
+    });
+  }
+},
    * الحصول على chunk محدد
    */
   async getChunk(req, res) {
