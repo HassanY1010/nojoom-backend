@@ -263,31 +263,34 @@ class RecommendationEngine {
       return [];
     }
 
-    // 3️⃣ توليد placeholders
-    const placeholders = cleanIds.map(() => '?').join(',');
+    // 3️⃣ التحقق من أن لدينا اتصال pool
+    if (!pool || typeof pool.query !== 'function') {
+      console.error('❌ Pool is not available or query method not found');
+      return [];
+    }
 
-    // 4️⃣ الاستعلام
+    // 4️⃣ استخدام query بدلاً من execute لتجنب مشاكل prepared statements
+    const safeLimit = parseInt(limit) || 10;
+    const idsString = cleanIds.join(',');
+    
     const sql = `
       SELECT v.*, u.username, u.avatar,
              COUNT(DISTINCT l.user_id) AS likes,
-             EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) AS is_liked
+             EXISTS(SELECT 1 FROM likes WHERE user_id = ${parsedUserId} AND video_id = v.id) AS is_liked
       FROM videos v
       JOIN users u ON v.user_id = u.id
       LEFT JOIN likes l ON v.id = l.video_id
-      WHERE v.user_id IN (${placeholders})
+      WHERE v.user_id IN (${idsString})
         AND v.deleted_by_admin = FALSE
         AND u.is_banned = FALSE
       GROUP BY v.id
       ORDER BY v.created_at DESC
-      LIMIT ?`;
+      LIMIT ${safeLimit}`;
 
-    // 5️⃣ إعداد الباراميترات بشكل صحيح
-    const params = [parsedUserId, ...cleanIds, parseInt(limit) || 10];
-    
-    console.log(`🔍 getFollowingVideos SQL: ${sql}`);
-    console.log(`🔍 getFollowingVideos params (${params.length}):`, params);
+    console.log(`🔍 getFollowingVideos SQL (direct):`, sql);
 
-    const [rows] = await pool.execute(sql, params);
+    // استخدام query مباشرة بدون prepared statements
+    const [rows] = await pool.query(sql);
     console.log(`✅ getFollowingVideos found ${rows.length} videos`);
 
     // 6️⃣ توليد روابط الفيديو و thumbnails كاملة من Supabase
@@ -305,7 +308,7 @@ class RecommendationEngine {
     console.error('❌ getFollowingVideos error:', err);
     console.error('❌ Error details:', {
       message: err.message,
-      sql: err.sql,
+      stack: err.stack,
       code: err.code
     });
     return [];
@@ -319,10 +322,17 @@ async getPopularVideos(userId, limit) {
 
     console.log(`🔍 getPopularVideos → user:${safeUserId}  limit:${safeLimit}`);
 
+    // التحقق من أن لدينا اتصال pool
+    if (!pool || typeof pool.query !== 'function') {
+      console.error('❌ Pool is not available or query method not found');
+      return [];
+    }
+
+    // استخدام query مباشرة بدون prepared statements
     const sql = `
       SELECT v.*, u.username, u.avatar,
              COUNT(DISTINCT l.user_id) AS likes,
-             EXISTS(SELECT 1 FROM likes WHERE user_id = ? AND video_id = v.id) AS is_liked
+             EXISTS(SELECT 1 FROM likes WHERE user_id = ${safeUserId} AND video_id = v.id) AS is_liked
       FROM videos v
       JOIN users u ON v.user_id = u.id
       LEFT JOIN likes l ON v.id = l.video_id
@@ -330,19 +340,18 @@ async getPopularVideos(userId, limit) {
         AND u.is_banned = FALSE
       GROUP BY v.id
       ORDER BY v.views DESC, v.created_at DESC
-      LIMIT ?`;
+      LIMIT ${safeLimit}`;
 
-    const params = [safeUserId, safeLimit];
-    console.log(`🔍 getPopularVideos params:`, params);
+    console.log(`🔍 getPopularVideos SQL (direct):`, sql);
 
-    const [rows] = await pool.execute(sql, params);
+    const [rows] = await pool.query(sql);
     console.log(`✅ getPopularVideos found ${rows.length} videos`);
     return rows;
   } catch (err) {
     console.error('❌ getPopularVideos error:', err);
     console.error('❌ Error details:', {
       message: err.message,
-      sql: err.sql,
+      stack: err.stack,
       code: err.code
     });
     return [];
