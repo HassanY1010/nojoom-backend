@@ -170,10 +170,10 @@ app.use('/api/notifications', notificationRoutes);
 // 7. Static Files
 // ======================================================
 app.use('/thumbnails', express.static(path.join(__dirname, 'thumbnails')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // ✅ إضافة هذا
 app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/default-avatar.png', express.static(path.join(__dirname, 'public', 'default-avatar.png')));
 app.use('/default-thumbnail.jpg', express.static(path.join(__dirname, 'public', 'default-thumbnail.jpg')));
-
 // ======================================================
 // 8. Start Server + Database + Socket.IO
 // ======================================================
