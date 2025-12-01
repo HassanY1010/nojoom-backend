@@ -23,8 +23,8 @@ static async create(videoData) {
   const [result] = await pool.execute(
     `INSERT INTO videos
        (user_id, video_url, thumbnail, description, is_public, path,
-        subspace_video_id, subspace_thumbnail_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        subspace_video_id, subspace_thumbnail_id, url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       user_id,
       video_url,
@@ -33,7 +33,8 @@ static async create(videoData) {
       is_public,
       finalPath,               // ✅ مضمون غير-null
       subspace_video_id,
-      subspace_thumbnail_id
+      subspace_thumbnail_id,
+      video_url || ''          // ✅ أضفنا url لتجنب خطأ default value
     ]
   );
   return result.insertId;
