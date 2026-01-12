@@ -306,18 +306,21 @@ export const usersController = {
           [currentUserId || 0, user.id]
         );
         videos = videoRows.map(video => {
-          const videoFilename = video.path ? path.basename(video.path) : '';
-          const thumbFilename = video.thumbnail ? path.basename(video.thumbnail) : '';
+          let rawVideoUrl = video.video_url || video.path || '/default-video.mp4';
+          if (rawVideoUrl && !rawVideoUrl.startsWith('http')) {
+            rawVideoUrl = `/uploads/videos/${path.basename(rawVideoUrl)}`;
+          }
 
-          const videoUrl = videoFilename ? `/uploads/videos/${videoFilename}` : (video.video_url || '/default-video.mp4');
-          const thumbUrl = (thumbFilename && !thumbFilename.includes('default'))
-            ? `/uploads/videos/thumbnails/${thumbFilename}`
-            : '/default-thumbnail.jpg';
+          let rawThumbUrl = video.thumbnail || '/default-thumbnail.jpg';
+          if (rawThumbUrl && !rawThumbUrl.startsWith('http')) {
+            const thumbFilename = path.basename(rawThumbUrl);
+            rawThumbUrl = thumbFilename.includes('default') ? '/default-thumbnail.jpg' : `/uploads/videos/thumbnails/${thumbFilename}`;
+          }
 
           return {
             ...video,
-            video_url: (videoUrl.startsWith('http')) ? videoUrl : usersController.getFullUrl(req, videoUrl),
-            thumbnail: (thumbUrl.startsWith('http')) ? thumbUrl : usersController.getFullUrl(req, thumbUrl)
+            video_url: rawVideoUrl.startsWith('http') ? rawVideoUrl : usersController.getFullUrl(req, rawVideoUrl),
+            thumbnail: rawThumbUrl.startsWith('http') ? rawThumbUrl : usersController.getFullUrl(req, rawThumbUrl)
           };
         });
         console.log('🎥 Videos standardized:', videos.length);
@@ -473,18 +476,21 @@ export const usersController = {
       console.log('🔄 Fetching liked videos for user:', currentUserId);
 
       const standardizedVideos = videos.map(video => {
-        const videoFilename = video.path ? path.basename(video.path) : '';
-        const thumbFilename = video.thumbnail ? path.basename(video.thumbnail) : '';
+        let rawVideoUrl = video.video_url || video.path || '/default-video.mp4';
+        if (rawVideoUrl && !rawVideoUrl.startsWith('http')) {
+          rawVideoUrl = `/uploads/videos/${path.basename(rawVideoUrl)}`;
+        }
 
-        const videoUrl = videoFilename ? `/uploads/videos/${videoFilename}` : (video.video_url || '/default-video.mp4');
-        const thumbUrl = (thumbFilename && !thumbFilename.includes('default'))
-          ? `/uploads/videos/thumbnails/${thumbFilename}`
-          : '/default-thumbnail.jpg';
+        let rawThumbUrl = video.thumbnail || '/default-thumbnail.jpg';
+        if (rawThumbUrl && !rawThumbUrl.startsWith('http')) {
+          const thumbFilename = path.basename(rawThumbUrl);
+          rawThumbUrl = thumbFilename.includes('default') ? '/default-thumbnail.jpg' : `/uploads/videos/thumbnails/${thumbFilename}`;
+        }
 
         return {
           ...video,
-          video_url: usersController.getFullUrl(req, videoUrl),
-          thumbnail: usersController.getFullUrl(req, thumbUrl)
+          video_url: rawVideoUrl.startsWith('http') ? rawVideoUrl : usersController.getFullUrl(req, rawVideoUrl),
+          thumbnail: rawThumbUrl.startsWith('http') ? rawThumbUrl : usersController.getFullUrl(req, rawThumbUrl)
         };
       });
 
@@ -526,18 +532,21 @@ export const usersController = {
       );
 
       const standardizedVideos = videos.map(video => {
-        const videoFilename = video.path ? path.basename(video.path) : '';
-        const thumbFilename = video.thumbnail ? path.basename(video.thumbnail) : '';
+        let rawVideoUrl = video.video_url || video.path || '/default-video.mp4';
+        if (rawVideoUrl && !rawVideoUrl.startsWith('http')) {
+          rawVideoUrl = `/uploads/videos/${path.basename(rawVideoUrl)}`;
+        }
 
-        const videoUrl = videoFilename ? `/uploads/videos/${videoFilename}` : (video.video_url || '/default-video.mp4');
-        const thumbUrl = (thumbFilename && !thumbFilename.includes('default'))
-          ? `/uploads/videos/thumbnails/${thumbFilename}`
-          : '/default-thumbnail.jpg';
+        let rawThumbUrl = video.thumbnail || '/default-thumbnail.jpg';
+        if (rawThumbUrl && !rawThumbUrl.startsWith('http')) {
+          const thumbFilename = path.basename(rawThumbUrl);
+          rawThumbUrl = thumbFilename.includes('default') ? '/default-thumbnail.jpg' : `/uploads/videos/thumbnails/${thumbFilename}`;
+        }
 
         return {
           ...video,
-          video_url: usersController.getFullUrl(req, videoUrl),
-          thumbnail: usersController.getFullUrl(req, thumbUrl)
+          video_url: rawVideoUrl.startsWith('http') ? rawVideoUrl : usersController.getFullUrl(req, rawVideoUrl),
+          thumbnail: rawThumbUrl.startsWith('http') ? rawThumbUrl : usersController.getFullUrl(req, rawThumbUrl)
         };
       });
 
@@ -594,15 +603,21 @@ export const usersController = {
       );
 
       const standardizedVideos = videos.map(video => {
-        const videoFilename = video.path ? path.basename(video.path) : '';
-        const thumbFilename = video.thumbnail ? path.basename(video.thumbnail) : '';
-        const videoUrl = videoFilename ? `/uploads/videos/${videoFilename}` : (video.video_url || '/default-video.mp4');
-        const thumbUrl = (thumbFilename && !thumbFilename.includes('default')) ? `/uploads/videos/thumbnails/${thumbFilename}` : '/default-thumbnail.jpg';
+        let rawVideoUrl = video.video_url || video.path || '/default-video.mp4';
+        if (rawVideoUrl && !rawVideoUrl.startsWith('http')) {
+          rawVideoUrl = `/uploads/videos/${path.basename(rawVideoUrl)}`;
+        }
+
+        let rawThumbUrl = video.thumbnail || '/default-thumbnail.jpg';
+        if (rawThumbUrl && !rawThumbUrl.startsWith('http')) {
+          const thumbFilename = path.basename(rawThumbUrl);
+          rawThumbUrl = thumbFilename.includes('default') ? '/default-thumbnail.jpg' : `/uploads/videos/thumbnails/${thumbFilename}`;
+        }
 
         return {
           ...video,
-          video_url: usersController.getFullUrl(req, videoUrl),
-          thumbnail: usersController.getFullUrl(req, thumbUrl)
+          video_url: rawVideoUrl.startsWith('http') ? rawVideoUrl : usersController.getFullUrl(req, rawVideoUrl),
+          thumbnail: rawThumbUrl.startsWith('http') ? rawThumbUrl : usersController.getFullUrl(req, rawThumbUrl)
         };
       });
 
