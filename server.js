@@ -58,9 +58,24 @@ app.set('trust proxy', 1); // Required for Render / Vercel proxies
 // ======================================================
 // 2. Global Middlewares - ✅ CORS FIXED
 // ======================================================
-// Handle preflight requests for ALL routes
+const allowedOrigins = [process.env.CLIENT_URL].filter(Boolean);
+
 app.use(cors({
-  origin: process.env.CLIENT_URL,
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, or same-origin)
+    if (!origin) return callback(null, true);
+
+    const isAllowed = allowedOrigins.indexOf(origin) !== -1 ||
+      origin.endsWith('.vercel.app') ||
+      origin.includes('localhost');
+
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.log('🚫 CORS Blocked Origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
