@@ -82,8 +82,8 @@ export class Message {
        WHERE (dm.sender_id = ? AND dm.receiver_id = ?) 
           OR (dm.sender_id = ? AND dm.receiver_id = ?)
        ORDER BY dm.created_at ASC
-       LIMIT ? OFFSET ?`,
-      [userId1, userId2, userId2, userId1, limit, offset]
+       LIMIT ${limit} OFFSET ${offset}`,
+      [userId1, userId2, userId2, userId1]
     );
     return rows;
   }
