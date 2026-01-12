@@ -1319,8 +1319,8 @@ export const usersController = {
            AND u.is_banned = FALSE
          GROUP BY u.id
          ORDER BY mutual_followers DESC, u.followers_count DESC
-         LIMIT ?`,
-        [userId, userId, userId, limit]
+         LIMIT ${limit}`,
+        [userId, userId, userId]
       );
 
       res.json({
