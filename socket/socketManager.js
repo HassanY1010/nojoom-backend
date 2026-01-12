@@ -24,7 +24,17 @@ export const initSocket = (server) => {
   try {
     io = new Server(server, {
       cors: {
-        origin: [process.env.CLIENT_URL].filter(Boolean),
+        origin: function (origin, callback) {
+          if (!origin) return callback(null, true);
+          const isAllowed = [process.env.CLIENT_URL].includes(origin) ||
+            origin.endsWith('.vercel.app') ||
+            origin.includes('localhost');
+          if (isAllowed) {
+            callback(null, true);
+          } else {
+            callback(new Error('Not allowed by CORS'));
+          }
+        },
         methods: ["GET", "POST"],
         credentials: true,
         allowedHeaders: ["Content-Type", "Authorization"]
