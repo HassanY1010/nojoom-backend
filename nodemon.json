@@ -1,0 +1,15 @@
+{
+    "watch": [
+        "."
+    ],
+    "ignore": [
+        "uploads/*",
+        "logs/*",
+        "*.log",
+        "temp/*",
+        "thumbnails/*",
+        "public/*"
+    ],
+    "ext": "js,json",
+    "exec": "node server.js"
+}
