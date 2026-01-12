@@ -13,16 +13,40 @@ export const videoController = {
 
   // Helper to construct full URL
   getFullUrl(req, pathStr) {
-    if (!pathStr) return null;
+    if (!pathStr || pathStr.startsWith('http')) return pathStr;
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    return `${protocol}://${host}${pathStr.startsWith('/') ? '' : '/'}${pathStr}`;
+  },
 
-    // ✅ إذا كان المسار رابطاً كاملاً بالفعل (مثل Cloudinary)، قم بإرجاعه كما هو
-    if (pathStr.startsWith('http')) return pathStr;
+  // ✅ هيلبر موحد لمعالجة بيانات الفيديو
+  standardizeVideo(req, v) {
+    if (!v) return v;
 
-    const protocol = req.protocol;
-    const host = req.get('host');
-    const baseUrl = `${protocol}://${host}`;
-    const cleanPath = pathStr.startsWith('/') ? pathStr : `/${pathStr}`;
-    return `${baseUrl}${cleanPath}`;
+    // معالجة الفيديو
+    let rawVideoUrl = v.video_url || v.path || '/default-video.mp4';
+    if (rawVideoUrl && !rawVideoUrl.startsWith('http')) {
+      rawVideoUrl = `/uploads/videos/${path.basename(rawVideoUrl)}`;
+    }
+    v.video_url = rawVideoUrl.startsWith('http') ? rawVideoUrl : videoController.getFullUrl(req, rawVideoUrl);
+
+    // معالجة المصغرة
+    let rawThumbUrl = v.thumbnail || '/default-thumbnail.jpg';
+    if (rawThumbUrl && !rawThumbUrl.startsWith('http')) {
+      const thumbFilename = path.basename(rawThumbUrl);
+      rawThumbUrl = thumbFilename.includes('default') ? '/default-thumbnail.jpg' : `/uploads/videos/thumbnails/${thumbFilename}`;
+    }
+    v.thumbnail = rawThumbUrl.startsWith('http') ? rawThumbUrl : videoController.getFullUrl(req, rawThumbUrl);
+
+    // معالجة الأفاتار
+    v.avatar = videoController.getFullUrl(req, v.avatar || '/default-avatar.png');
+
+    // تحويل الأرقام
+    v.likes = parseInt(v.likes) || 0;
+    v.views = parseInt(v.views) || 0;
+    v.comment_count = parseInt(v.comment_count) || 0;
+
+    return v;
   },
   // ==================== دوال المشاركة الجديدة ====================
 
@@ -153,17 +177,7 @@ export const videoController = {
         );
         video.comment_count = commentCount[0].count;
 
-        // ✅ مسارات موحدة
-        const videoFilename = video.path ? path.basename(video.path) : '';
-        const rawVideoUrl = videoFilename ? `/uploads/videos/${videoFilename}` : (video.video_url || '/default-video.mp4');
-        video.video_url = videoController.getFullUrl(req, rawVideoUrl);
-
-        const thumbFilename = video.thumbnail ? path.basename(video.thumbnail) : '';
-        const rawThumbUrl = thumbFilename.includes('default')
-          ? '/default-thumbnail.jpg'
-          : `/uploads/videos/thumbnails/${thumbFilename}`;
-        video.thumbnail = videoController.getFullUrl(req, rawThumbUrl);
-        video.avatar = videoController.getFullUrl(req, video.avatar || '/default-avatar.png');
+        videoController.standardizeVideo(req, video);
       }
 
       res.json({ success: true, videos: videos || [] });
@@ -343,31 +357,7 @@ export const videoController = {
       const uniqueVideos = Array.from(uniqueMap.values());
 
       for (const v of uniqueVideos) {
-        try {
-          const [[{ count }]] = await pool.execute(
-            'SELECT COUNT(*) AS count FROM comments WHERE video_id = ? AND deleted_by_admin = FALSE',
-            [v.id]
-          );
-          v.comment_count = parseInt(count) || 0;
-
-          v.likes = parseInt(v.likes) || 0;
-          v.views = parseInt(v.views) || 0;
-          v.user_id = parseInt(v.user_id) || 0;
-
-          // ✅ مسارات موحدة
-          const videoPath = v.path || '';
-          v.video_url = (videoPath.startsWith('http')) ? videoPath : (v.video_url || '/default-video.mp4');
-
-          const thumbPath = v.thumbnail || '';
-          v.thumbnail = (thumbPath.startsWith('http')) ? thumbPath : (thumbPath.includes('default')
-            ? '/default-thumbnail.jpg'
-            : `/uploads/videos/thumbnails/${path.basename(thumbPath)}`);
-
-        } catch (e) {
-          console.warn(`⚠️ Failed to enrich video ${v.id}:`, e.message);
-          v.comment_count = 0;
-          v.thumbnail = '/default-thumbnail.jpg';
-        }
+        videoController.standardizeVideo(req, v);
       }
 
       return res.json({
@@ -975,41 +965,42 @@ export const videoController = {
   async getManifest(req, res) {
     try {
       const { videoId } = req.params;
+      const video = await Video.findById(videoId);
 
-      // 🔹 تحسين المسار والبحث (الأكثر احتمالية أولاً)
+      if (!video) return res.status(404).json({ error: 'Video not found' });
+
+      // 🔹 HLS Manifest Local Path
       const manifestPath = path.join(process.cwd(), 'uploads', 'chunks', videoId, 'master.m3u8');
 
-      if (!fs.existsSync(manifestPath)) {
-        console.log(`ℹ️ HLS manifest not found for video ${videoId}, returning MP4 fallback`);
-        const video = await Video.findById(videoId);
-        const videoFilename = video?.path ? path.basename(video.path) : `${videoId}.mp4`;
-
+      if (fs.existsSync(manifestPath)) {
+        const manifestUrl = videoController.getFullUrl(req, `/uploads/chunks/${videoId}/master.m3u8`);
         return res.json({
-          manifestUrl: null,
-          processingStatus: 'not_available',
-          message: 'HLS streaming not available for this video',
-          fallbackUrl: `${process.env.API_URL || 'http://localhost:5000'}/uploads/videos/${videoFilename}`
+          manifestUrl,
+          processingStatus: 'completed'
         });
       }
 
-      // 🔹 تحويل المسار إلى URL قابل للوصول
-      const manifestUrl = `${process.env.API_URL || 'http://localhost:5000'}/uploads/chunks/${videoId}/master.m3u8`;
+      // 🔹 Fallback to MP4 (Cloudinary or Local)
+      let fallbackUrl = video.video_url || video.path || '/default-video.mp4';
+      if (!fallbackUrl.startsWith('http')) {
+        fallbackUrl = videoController.getFullUrl(req, `/uploads/videos/${path.basename(fallbackUrl)}`);
+      }
 
-      console.log(`✅ Found HLS manifest for video ${videoId}: ${manifestUrl}`);
+      console.log(`ℹ️ HLS manifest not found for video ${videoId}, returning fallback: ${fallbackUrl}`);
 
       res.json({
-        manifestUrl,
-        processingStatus: 'completed'
+        manifestUrl: null,
+        processingStatus: 'not_available',
+        message: 'HLS streaming not available',
+        fallbackUrl
       });
 
     } catch (error) {
       console.error('Get manifest error:', error);
-      // 🔹 إرجاع fallback بدلاً من error
       res.json({
         manifestUrl: null,
         processingStatus: 'error',
-        error: 'HLS not available',
-        fallbackUrl: `${process.env.API_URL || 'http://localhost:5000'}/uploads/videos/${videoId}.mp4`
+        error: 'Manifest load failed'
       });
     }
   },
