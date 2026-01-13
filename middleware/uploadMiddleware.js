@@ -23,7 +23,13 @@ const videoStorage = new CloudinaryStorage({
     public_id: (req, file) => {
       const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
       return 'video-' + uniqueSuffix;
-    }
+    },
+    // 🔥 HLS (m3u8) Eager Transformation
+    eager: [
+      { streaming_profile: 'hd', format: 'm3u8' },
+      { width: 600, height: 1067, crop: 'fill', format: 'jpg' } // Automatic thumbnail
+    ],
+    eager_async: true
   },
 });
 
