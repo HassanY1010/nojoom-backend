@@ -19,12 +19,33 @@ export const videoController = {
     return `${protocol}://${host}${pathStr.startsWith('/') ? '' : '/'}${pathStr}`;
   },
 
+  // ✅ Helper to optimize Cloudinary images
+  optimizeImageUrl(url, type = 'avatar') {
+    if (!url || !url.includes('cloudinary.com')) return url;
+
+    // Define transformations based on image type
+    const transformations = {
+      avatar: 'w_200,h_200,c_fill,f_webp,q_80',
+      thumbnail: 'w_600,h_1067,c_fill,f_webp,q_85',
+      small: 'w_400,h_400,c_fill,f_webp,q_80'
+    };
+
+    const transform = transformations[type] || transformations.avatar;
+
+    // Insert transformation into Cloudinary URL
+    if (url.includes('/upload/')) {
+      return url.replace('/upload/', `/upload/${transform}/`);
+    }
+
+    return url;
+  },
+
   // ✅ هيلبر موحد لمعالجة بيانات الفيديو
   standardizeVideo(req, v) {
     if (!v) return v;
 
     // معالجة الفيديو
-    let rawVideoUrl = v.video_url || v.path || '/default-video.mp4';
+    let rawVideoUrl = v.video_url || v.path || null;
     if (rawVideoUrl && !rawVideoUrl.startsWith('http')) {
       rawVideoUrl = `/uploads/videos/${path.basename(rawVideoUrl)}`;
     }
@@ -38,8 +59,12 @@ export const videoController = {
     }
     v.thumbnail = rawThumbUrl.startsWith('http') ? rawThumbUrl : videoController.getFullUrl(req, rawThumbUrl);
 
-    // معالجة الأفاتار
-    v.avatar = videoController.getFullUrl(req, v.avatar || '/default-avatar.png');
+    // معالجة الأفاتار مع التحسين
+    let avatarUrl = v.avatar || '/default-avatar.png';
+    if (avatarUrl && avatarUrl.startsWith('http')) {
+      avatarUrl = videoController.optimizeImageUrl(avatarUrl, 'avatar');
+    }
+    v.avatar = videoController.getFullUrl(req, avatarUrl);
 
     // تحويل الأرقام
     v.likes = parseInt(v.likes) || 0;
@@ -981,7 +1006,7 @@ export const videoController = {
       }
 
       // 🔹 Fallback to MP4 (Cloudinary or Local)
-      let fallbackUrl = video.video_url || video.path || '/default-video.mp4';
+      let fallbackUrl = video.video_url || video.path || null;
       if (!fallbackUrl.startsWith('http')) {
         fallbackUrl = videoController.getFullUrl(req, `/uploads/videos/${path.basename(fallbackUrl)}`);
       }
