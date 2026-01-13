@@ -44,12 +44,24 @@ export const videoController = {
   standardizeVideo(req, v) {
     if (!v) return v;
 
-    // معالجة الفيديو
+    // معالجة الفيديو - استخدام Cloudinary
     let rawVideoUrl = v.video_url || v.path || null;
+
+    // إذا كان path يحتوي على معرف Cloudinary (مثل: nojoom/videos/video-123)
     if (rawVideoUrl && !rawVideoUrl.startsWith('http')) {
-      rawVideoUrl = `/uploads/videos/${path.basename(rawVideoUrl)}`;
+      // تحقق إذا كان path من Cloudinary
+      if (rawVideoUrl.includes('nojoom/videos/') || rawVideoUrl.startsWith('video-')) {
+        // بناء رابط Cloudinary الكامل
+        const cloudinaryPath = rawVideoUrl.includes('nojoom/videos/')
+          ? rawVideoUrl
+          : `nojoom/videos/${rawVideoUrl}`;
+        rawVideoUrl = `https://res.cloudinary.com/dg7m2vey6/video/upload/${cloudinaryPath}.mp4`;
+      } else {
+        // مسار محلي قديم
+        rawVideoUrl = `/uploads/videos/${path.basename(rawVideoUrl)}`;
+      }
     }
-    v.video_url = rawVideoUrl.startsWith('http') ? rawVideoUrl : videoController.getFullUrl(req, rawVideoUrl);
+    v.video_url = rawVideoUrl || null;
 
     // معالجة المصغرة
     let rawThumbUrl = v.thumbnail || '/default-thumbnail.jpg';
