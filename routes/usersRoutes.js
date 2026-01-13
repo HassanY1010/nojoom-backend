@@ -74,6 +74,9 @@ router.put('/notification-settings', authenticateToken, usersController.updateNo
 // ✅ البحث عن مستخدمين
 router.get('/search', authenticateToken, usersController.searchUsers);
 
+// ✅ الحصول على المستخدمين (مع فلترة وصفحات)
+router.get('/', authenticateToken, usersController.getUsers);
+
 // ✅ الحصول على المستخدمين المقترحين للمتابعة
 router.get('/suggested-users', authenticateToken, usersController.getSuggestedUsers);
 
