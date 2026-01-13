@@ -820,6 +820,85 @@ export const usersController = {
     }
   },
 
+  // ✅ الحصول على قائمة المستخدمين (مع فلترة)
+  async getUsers(req, res) {
+    try {
+      // 🔹 التحقق من المعاملات وتحويلها بشكل آمن
+      const page = Math.max(1, parseInt(req.query.page) || 1);
+      const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+      const userId = req.query.userId ? parseInt(req.query.userId) : null;
+
+      console.log('🔄 Fetching users:', { page, limit, userId });
+
+      // 🔹 التحقق من صحة userId
+      if (userId && (isNaN(userId) || userId <= 0)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid userId parameter'
+        });
+      }
+
+      const offset = (page - 1) * limit;
+
+      // 🔹 بناء الاستعلام بشكل آمن
+      let query = `
+        SELECT id, username, email, avatar, bio, followers_count, following_count, 
+               likes_count, views_count, created_at
+        FROM users 
+        WHERE is_banned = FALSE
+      `;
+      const params = [];
+
+      // 🔹 استبعاد المستخدم الحالي إذا تم تمريره
+      if (userId) {
+        query += ' AND id != ?';
+        params.push(userId);
+      }
+
+      query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+      params.push(limit, offset);
+
+      const [users] = await pool.execute(query, params);
+
+      // 🔹 بناء روابط الصور الكاملة
+      const standardizedUsers = users.map(user => ({
+        ...user,
+        avatar: usersController.getFullUrl(req, user.avatar || '/default-avatar.png')
+      }));
+
+      // 🔹 حساب إجمالي العدد للصفحات
+      let countQuery = 'SELECT COUNT(*) as total FROM users WHERE is_banned = FALSE';
+      const countParams = [];
+
+      if (userId) {
+        countQuery += ' AND id != ?';
+        countParams.push(userId);
+      }
+
+      const [totalResult] = await pool.execute(countQuery, countParams);
+      const total = totalResult[0].total;
+
+      res.json({
+        success: true,
+        data: standardizedUsers,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ Get users error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch users',
+        error: error.message
+      });
+    }
+  },
+
   // ✅ متابعة مستخدم
   async followUser(req, res) {
     try {
