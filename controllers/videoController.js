@@ -470,7 +470,7 @@ export const videoController = {
           console.warn(`⚠️ Error processing video ${video.id}:`, error.message);
           video.comment_count = 0;
           video.thumbnail = '/default-thumbnail.jpg';
-          video.video_url = '/default-video.mp4';
+          video.video_url = 'https://assets.mixkit.co/videos/preview/mixkit-stars-in-the-night-sky-121-large.mp4';
         }
       }
 
@@ -563,7 +563,7 @@ export const videoController = {
 
         // ✅ التأكد من وجود thumbnail ورابط فيديو
         const videoFilename = video.path ? path.basename(video.path) : '';
-        video.video_url = videoFilename ? `/uploads/videos/${videoFilename}` : (video.video_url || '/default-video.mp4');
+        video.video_url = videoFilename ? `/uploads/videos/${videoFilename}` : (video.video_url || 'https://assets.mixkit.co/videos/preview/mixkit-stars-in-the-night-sky-121-large.mp4');
 
         const thumbFilename = video.thumbnail ? path.basename(video.thumbnail) : '';
         video.thumbnail = thumbFilename.includes('default')
@@ -867,7 +867,7 @@ export const videoController = {
       rows.forEach(v => {
         // ✅ مسارات موحدة
         const videoPath = v.path || '';
-        v.video_url = (videoPath.startsWith('http')) ? videoPath : (v.video_url || '/default-video.mp4');
+        v.video_url = (videoPath.startsWith('http')) ? videoPath : (v.video_url || 'https://assets.mixkit.co/videos/preview/mixkit-stars-in-the-night-sky-121-large.mp4');
 
         const thumbPath = v.thumbnail || '';
         v.thumbnail = (thumbPath.startsWith('http')) ? thumbPath : (thumbPath.includes('default')
@@ -917,7 +917,7 @@ export const videoController = {
 
         // ✅ مسارات موحدة
         const videoFilename = video.path ? path.basename(video.path) : '';
-        video.video_url = videoFilename ? `/uploads/videos/${videoFilename}` : (video.video_url || '/default-video.mp4');
+        video.video_url = videoFilename ? `/uploads/videos/${videoFilename}` : (video.video_url || 'https://assets.mixkit.co/videos/preview/mixkit-stars-in-the-night-sky-121-large.mp4');
 
         const thumbFilename = video.thumbnail ? path.basename(video.thumbnail) : '';
         video.thumbnail = thumbFilename.includes('default')
@@ -950,7 +950,7 @@ export const videoController = {
 
         // ✅ مسارات موحدة
         const videoFilename = video.path ? path.basename(video.path) : '';
-        video.video_url = videoFilename ? `/uploads/videos/${videoFilename}` : (video.video_url || '/default-video.mp4');
+        video.video_url = videoFilename ? `/uploads/videos/${videoFilename}` : (video.video_url || 'https://assets.mixkit.co/videos/preview/mixkit-stars-in-the-night-sky-121-large.mp4');
 
         const thumbFilename = video.thumbnail ? path.basename(video.thumbnail) : '';
         video.thumbnail = thumbFilename.includes('default')
@@ -998,7 +998,6 @@ export const videoController = {
   /**
    * الحصول على manifest file للفيديو (HLS)
    */
-  // في videoController.js - إصلاح دالة getManifest
   async getManifest(req, res) {
     try {
       const { videoId } = req.params;
@@ -1006,9 +1005,8 @@ export const videoController = {
 
       if (!video) return res.status(404).json({ error: 'Video not found' });
 
-      // 🔹 HLS Manifest Local Path
+      // 1️⃣ Check for Local HLS Manifest (Old way)
       const manifestPath = path.join(process.cwd(), 'uploads', 'chunks', videoId, 'master.m3u8');
-
       if (fs.existsSync(manifestPath)) {
         const manifestUrl = videoController.getFullUrl(req, `/uploads/chunks/${videoId}/master.m3u8`);
         return res.json({
@@ -1017,9 +1015,28 @@ export const videoController = {
         });
       }
 
-      // 🔹 Fallback to MP4 (Cloudinary or Local)
+      // 2️⃣ Check for Cloudinary HLS (New way)
+      // video.path stores the public_id in Cloudinary (e.g., "nojoom/videos/video-123")
+      if (video.path && (video.path.includes('nojoom/videos') || video.path.startsWith('video-'))) {
+        const publicId = video.path.includes('nojoom/videos')
+          ? video.path
+          : `nojoom/videos/${video.path}`;
+
+        // Cloudinary HLS URL format: https://res.cloudinary.com/<cloud_name>/video/upload/sp_hd/v1/<public_id>.m3u8
+        const cloudName = process.env.CLOUDINARY_CLOUD_NAME || 'dg7m2vey6';
+        const hlsUrl = `https://res.cloudinary.com/${cloudName}/video/upload/sp_hd/${publicId}.m3u8`;
+
+        console.log(`📡 Returning Cloudinary HLS for video ${videoId}: ${hlsUrl}`);
+
+        return res.json({
+          manifestUrl: hlsUrl,
+          processingStatus: 'completed' // Assume completed if we construct it, or user can wait for eager
+        });
+      }
+
+      // 3️⃣ Fallback to MP4 (Cloudinary or Local)
       let fallbackUrl = video.video_url || video.path || null;
-      if (!fallbackUrl.startsWith('http')) {
+      if (fallbackUrl && !fallbackUrl.startsWith('http')) {
         fallbackUrl = videoController.getFullUrl(req, `/uploads/videos/${path.basename(fallbackUrl)}`);
       }
 
@@ -1115,7 +1132,7 @@ export const videoController = {
           lastPosition: 0,
           watchTime: 0,
           completed: false,
-          video_url: "/default-video.mp4" // رابط افتراضي
+          video_url: "https://assets.mixkit.co/videos/preview/mixkit-stars-in-the-night-sky-121-large.mp4" // رابط افتراضي
         });
       }
 
