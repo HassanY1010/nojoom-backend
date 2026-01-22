@@ -58,6 +58,7 @@ app.set('trust proxy', 1); // Required for Render / Vercel proxies
 // ======================================================
 // 2. Global Middlewares - ✅ CORS FIXED
 // ======================================================
+const isProduction = process.env.NODE_ENV === 'production';
 const allowedOrigins = [process.env.CLIENT_URL].filter(Boolean);
 
 app.use(cors({
@@ -66,8 +67,7 @@ app.use(cors({
     if (!origin) return callback(null, true);
 
     const isAllowed = allowedOrigins.indexOf(origin) !== -1 ||
-      origin.endsWith('.vercel.app') ||
-      origin.includes('localhost');
+      (!isProduction && (origin.endsWith('.vercel.app') || origin.includes('localhost')));
 
     if (isAllowed) {
       callback(null, true);
@@ -78,7 +78,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Refresh-Token', 'X-Refresh-Token']
 }));
 
 // Handle preflight OPTIONS requests globally
@@ -92,7 +92,18 @@ app.use((req, res, next) => {
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
-  contentSecurityPolicy: false
+  contentSecurityPolicy: isProduction ? {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:", "http:"],
+      connectSrc: ["'self'", "https:", "http:", "wss:", "ws:"],
+      videoSrc: ["'self'", "https:", "http:", "blob:"],
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: [],
+    },
+  } : false
 }));
 
 app.use(compression());
@@ -277,25 +288,27 @@ const startServer = async () => {
   }
 };
 
-// ==================== Debug Routes ====================
+// ==================== Debug Routes (Development Only) ====================
 
-// ✅ إضافة endpoint للتحقق من هيكل الجداول
-app.get('/api/debug/tables', async (req, res) => {
-  try {
-    const [tables] = await pool.execute(`
-      SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT
-      FROM INFORMATION_SCHEMA.COLUMNS 
-      WHERE TABLE_SCHEMA = DATABASE() 
-      AND TABLE_NAME IN ('videos', 'watch_history', 'users')
-      ORDER BY TABLE_NAME, ORDINAL_POSITION
-    `);
+if (!isProduction) {
+  // ✅ إضافة endpoint للتحقق من هيكل الجداول
+  app.get('/api/debug/tables', async (req, res) => {
+    try {
+      const [tables] = await pool.execute(`
+        SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME IN ('videos', 'watch_history', 'users')
+        ORDER BY TABLE_NAME, ORDINAL_POSITION
+      `);
 
-    res.json({ tables });
-  } catch (error) {
-    console.error('Debug tables error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+      res.json({ tables });
+    } catch (error) {
+      console.error('Debug tables error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+}
 
 // ==================== User Routes ====================
 
