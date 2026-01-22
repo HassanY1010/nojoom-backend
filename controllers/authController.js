@@ -327,16 +327,8 @@ export const authController = {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      let isMatch = false;
-
-      // 🔥 المدير → كلمة مروره غير مشفرة نهائياً
-      if (user.role === 'admin') {
-        isMatch = password === user.password;
-      }
-      // باقي المستخدمين → يستخدمون bcrypt
-      else {
-        isMatch = await User.validatePassword(password, user.password);
-      }
+      // التحقق من كلمة السر (المشفرة) لجميع الرتب بما فيهم المدير
+      const isMatch = await User.validatePassword(password, user.password);
 
       if (!isMatch) {
         return res.status(401).json({ error: 'Invalid credentials' });
