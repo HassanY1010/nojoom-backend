@@ -17,8 +17,9 @@ export class User {
       birthYear
     } = userData;
 
-    // 🔥 كلمات السر غير مشفرة بناءً على طلب المستخدم (بيئة محلية)
-    let finalPassword = password;
+    // 🔥 كلمات السر مشفرة باستخدام bcrypt لحماية أمن المستخدمين
+    const salt = await bcrypt.genSalt(10);
+    const finalPassword = await bcrypt.hash(password, salt);
 
     const [result] = await pool.execute(
       `INSERT INTO users 
@@ -82,8 +83,13 @@ export class User {
   }
 
   static async validatePassword(plainPassword, storedPassword) {
-    // 🔥 مقارنة نصية مباشرة (غير آمنة - للبيئة المحلية فقط)
-    return plainPassword === storedPassword;
+    // التحقق من كلمة السر باستخدام bcrypt
+    try {
+      return await bcrypt.compare(plainPassword, storedPassword);
+    } catch (error) {
+      console.error('Error validating password:', error);
+      return false;
+    }
   }
 
   // ============ نظام التوصية ============
@@ -374,10 +380,12 @@ export class User {
 
   static async updatePassword(userId, newPassword) {
     try {
-      // 🔥 تحديث بكلمة سر غير مشفرة
+      // 🔥 تحديث بكلمة سر مشفرة
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(newPassword, salt);
       const [result] = await pool.execute(
         'UPDATE users SET password = ? WHERE id = ?',
-        [newPassword, userId]
+        [hashedPassword, userId]
       );
       return result.affectedRows > 0;
     } catch (error) {
