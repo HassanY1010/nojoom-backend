@@ -3,6 +3,7 @@ import { videoController } from '../controllers/videoController.js';
 import { commentController } from '../controllers/commentController.js';
 import { authenticateToken } from '../middleware/authMiddleware.js';
 import { upload } from '../middleware/uploadMiddleware.js';
+import { videoUploadValidation } from '../middleware/validationMiddleware.js';
 
 const router = express.Router();
 
@@ -52,6 +53,7 @@ router.post(
   '/upload',
   authenticateToken,
   upload.single('video'),
+  videoUploadValidation,
   videoController.uploadVideo
 );
 
