@@ -3,6 +3,7 @@ import express from 'express';
 import { authController } from '../controllers/authController.js';
 import { uploadAvatar } from '../middleware/uploadMiddleware.js';
 import { authenticateToken, refreshTokenMiddleware } from '../middleware/authMiddleware.js';
+import { registerValidation, loginValidation } from '../middleware/validationMiddleware.js';
 import { sendVerificationCode } from "../utils/sendEmail.js";
 import { pool } from '../config/db.js';
 
@@ -15,12 +16,12 @@ const router = express.Router();
 
 
 // تسجيل مستخدم جديد مع رفع صورة
-router.post('/register', uploadAvatar.single('avatar'), authController.register);
+router.post('/register', uploadAvatar.single('avatar'), registerValidation, authController.register);
 
 router.post('/check-username', authController.checkUsername);
 
 // تسجيل الدخول
-router.post('/login', authController.login);
+router.post('/login', loginValidation, authController.login);
 
 // تجديد الـ token
 router.post('/refresh', authController.refreshToken);
